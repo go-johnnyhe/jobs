@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 import requests
+from bs4 import BeautifulSoup
 
 from config import GITHUB_REPOS, TARGET_COMPANIES, PREFERRED_LOCATIONS
 
@@ -74,51 +75,59 @@ class GitHubTracker:
             return []
 
     def _parse_simplify_readme(self, content: str) -> list[Job]:
-        """Parse the SimplifyJobs README.md format."""
+        """Parse the SimplifyJobs README.md format (HTML tables)."""
         jobs = []
+        soup = BeautifulSoup(content, "html.parser")
 
-        # The SimplifyJobs README has a markdown table format like:
-        # | Company | Role | Location | Application/Link | Date Posted |
-        # Find the table section
-        lines = content.split("\n")
-        in_table = False
-
-        for line in lines:
-            line = line.strip()
-
-            # Skip empty lines and header separator
-            if not line or line.startswith("|--") or line.startswith("| --"):
+        # Find all table rows
+        for row in soup.find_all("tr"):
+            cells = row.find_all("td")
+            if len(cells) < 4:
                 continue
 
-            # Check if this looks like a table row
-            if line.startswith("|") and line.endswith("|"):
-                parts = [p.strip() for p in line.split("|")[1:-1]]  # Remove empty first/last
-
-                if len(parts) >= 4:
-                    # Check if this is a header row
-                    if "company" in parts[0].lower() or "role" in parts[0].lower():
-                        in_table = True
-                        continue
-
-                    if in_table:
-                        job = self._parse_table_row(parts)
-                        if job and self._matches_criteria(job):
-                            jobs.append(job)
+            job = self._parse_html_row(cells)
+            if job and self._matches_criteria(job):
+                jobs.append(job)
 
         return jobs
 
-    def _parse_table_row(self, parts: list[str]) -> Optional[Job]:
-        """Parse a single table row into a Job object."""
+    def _parse_html_row(self, cells) -> Optional[Job]:
+        """Parse an HTML table row into a Job object."""
         try:
-            company = self._extract_text(parts[0])
-            title = self._extract_text(parts[1])
-            location = self._extract_text(parts[2]) if len(parts) > 2 else ""
+            # Cell 0: Company (with link)
+            company_cell = cells[0]
+            company_link = company_cell.find("a")
+            company = company_link.get_text(strip=True) if company_link else company_cell.get_text(strip=True)
 
-            # Extract URL from markdown link
-            url = self._extract_url(parts[3]) if len(parts) > 3 else ""
-            date_posted = self._extract_text(parts[4]) if len(parts) > 4 else ""
+            # Cell 1: Role/Title
+            title = cells[1].get_text(strip=True)
+
+            # Cell 2: Location
+            location = cells[2].get_text(strip=True) if len(cells) > 2 else ""
+
+            # Cell 3: Application link - find the first actual job link (not simplify.jobs)
+            url = ""
+            if len(cells) > 3:
+                for link in cells[3].find_all("a", href=True):
+                    href = link.get("href", "")
+                    # Skip simplify.jobs links, get the actual application link
+                    if href and "simplify.jobs" not in href:
+                        url = href
+                        break
+                # If only simplify link found, use it as fallback
+                if not url:
+                    first_link = cells[3].find("a", href=True)
+                    if first_link:
+                        url = first_link.get("href", "")
+
+            # Cell 4: Date/Age
+            date_posted = cells[4].get_text(strip=True) if len(cells) > 4 else ""
 
             if not company or not url:
+                return None
+
+            # Skip closed positions (marked with 🔒)
+            if "🔒" in str(cells[3]):
                 return None
 
             return Job(
