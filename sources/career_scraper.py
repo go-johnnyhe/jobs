@@ -6,7 +6,8 @@ from typing import Optional
 import requests
 from bs4 import BeautifulSoup
 
-from config import COMPANIES, TITLE_KEYWORDS, ROLE_KEYWORDS, PREFERRED_LOCATIONS
+from config import COMPANIES, TITLE_KEYWORDS, ROLE_KEYWORDS
+from filters import matches_job_criteria, matches_location, is_senior_level, has_new_grad_indicator
 from .github_tracker import Job
 
 
@@ -269,21 +270,25 @@ class CareerScraper:
             return False
 
         # Check for new grad / entry level keywords
-        has_level_keyword = any(kw in title_lower for kw in TITLE_KEYWORDS)
+        is_new_grad = has_new_grad_indicator(title_lower)
 
-        # If title has level keyword, definitely include it
-        if has_level_keyword:
+        # If title has new grad keyword, still check seniority and location
+        if is_new_grad:
+            # Even new grad roles should pass seniority check (avoid "Senior - New Grad Program")
+            if is_senior_level(title_lower):
+                return False
+            # Check location with word boundaries
+            if job.location and not matches_location(job.location):
+                return False
             return True
 
-        # Check location if we have preferred locations
-        if PREFERRED_LOCATIONS and job.location:
-            location_lower = job.location.lower()
-            location_match = any(loc in location_lower for loc in PREFERRED_LOCATIONS)
-            if not location_match:
-                return False
+        # For non-explicit new grad roles, apply full filtering
+        # Must not be senior level
+        if is_senior_level(title_lower):
+            return False
 
-        # Include generic SWE roles that don't have "senior" or "staff"
-        exclude_keywords = ["senior", "staff", "principal", "lead", "manager", "director"]
-        has_senior_keyword = any(kw in title_lower for kw in exclude_keywords)
+        # Check location with word boundaries
+        if job.location and not matches_location(job.location):
+            return False
 
-        return not has_senior_keyword
+        return True

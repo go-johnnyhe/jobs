@@ -247,5 +247,19 @@ TARGET_COMPANIES = [
     "plaid",
 ]
 
+# Seniority exclusions - keywords that indicate non-entry-level positions
+SENIORITY_EXCLUSIONS = [
+    "senior", "staff", "principal", "lead", "manager", "director", "sr.", "sr ",
+]
+
+# Seniority exclusion patterns - regex patterns for detecting senior roles
+SENIORITY_EXCLUSION_PATTERNS = [
+    r'\b(?:sde|swe|engineer|developer)\s*[2-9]\b',       # SDE 2, Engineer 3
+    r'\b(?:sde|swe|engineer|developer)\s*(?:ii|iii|iv|v)\b',  # SDE II, III
+    r'\bl[4-9]\b',                                        # L4, L5, L6
+    r'\blevel\s*[4-9]\b',                                # Level 4, Level 5
+    r'\b[2-9]\+?\s*years?\b',                            # 2+ years experience
+]
+
 # SQLite database path
 DATABASE_PATH = os.path.join(os.path.dirname(__file__), "jobs.db")

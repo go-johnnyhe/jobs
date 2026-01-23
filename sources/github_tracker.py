@@ -7,7 +7,8 @@ from typing import Optional
 import requests
 from bs4 import BeautifulSoup
 
-from config import GITHUB_REPOS, TARGET_COMPANIES, PREFERRED_LOCATIONS
+from config import GITHUB_REPOS, TARGET_COMPANIES
+from filters import matches_job_criteria
 
 
 @dataclass
@@ -174,14 +175,5 @@ class GitHubTracker:
         if not company_match:
             return False
 
-        # Check location if we have preferred locations
-        if PREFERRED_LOCATIONS:
-            location_lower = job.location.lower()
-            location_match = (
-                not location_lower or  # Accept if no location specified
-                any(loc in location_lower for loc in PREFERRED_LOCATIONS)
-            )
-            if not location_match:
-                return False
-
-        return True
+        # Use shared filter for seniority and location checks
+        return matches_job_criteria(job)
