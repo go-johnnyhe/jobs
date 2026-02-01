@@ -7,7 +7,14 @@ import requests
 from bs4 import BeautifulSoup
 
 from config import COMPANIES, TITLE_KEYWORDS, ROLE_KEYWORDS
-from filters import matches_job_criteria, matches_location, is_senior_level, has_new_grad_indicator
+from filters import (
+    has_blocked_location,
+    has_excluded_title,
+    has_new_grad_indicator,
+    is_senior_level,
+    matches_job_criteria,
+    matches_location,
+)
 from .github_tracker import Job
 
 
@@ -264,31 +271,40 @@ class CareerScraper:
         """Check if a job matches our filtering criteria."""
         title_lower = job.title.lower()
 
-        # Check for role keywords
+        # Check for role keywords first
         has_role_keyword = any(kw in title_lower for kw in ROLE_KEYWORDS)
         if not has_role_keyword:
+            return False
+
+        # Check title exclusions (non-SWE roles like Sales Engineer, Android Engineer)
+        if has_excluded_title(title_lower):
             return False
 
         # Check for new grad / entry level keywords
         is_new_grad = has_new_grad_indicator(title_lower)
 
-        # If title has new grad keyword, still check seniority and location
-        if is_new_grad:
-            # Even new grad roles should pass seniority check (avoid "Senior - New Grad Program")
-            if is_senior_level(title_lower):
-                return False
-            # Check location with word boundaries
-            if job.location and not matches_location(job.location):
-                return False
-            return True
-
-        # For non-explicit new grad roles, apply full filtering
-        # Must not be senior level
+        # Check seniority - always exclude senior roles unless explicitly new grad
         if is_senior_level(title_lower):
+            # Exception: if it has new grad keywords AND level 1, allow it
+            if is_new_grad:
+                import re
+                has_level_one = bool(re.search(r'\b(?:sde|swe|engineer|developer)\s*[i1]\b', title_lower, re.IGNORECASE))
+                if not has_level_one:
+                    return False
+            else:
+                return False
+
+        # Check blocked locations (UK, India, Europe, Canada, etc.)
+        if has_blocked_location(job.location):
             return False
 
-        # Check location with word boundaries
+        # Check preferred locations (only if location is specified)
         if job.location and not matches_location(job.location):
+            return False
+
+        # For jobs from generic scraping (empty location), require new grad keywords
+        # This prevents letting through all jobs without location info
+        if not job.location and not is_new_grad:
             return False
 
         return True

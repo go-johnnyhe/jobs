@@ -137,6 +137,273 @@ COMPANIES = {
         "url": "https://www.rubrik.com/company/careers/departments/job-openings",
         "ats": "greenhouse",
     },
+    # Fintech
+    "Plaid": {
+        "url": "https://plaid.com/careers/openings/",
+        "ats": "lever",
+    },
+    "Robinhood": {
+        "url": "https://robinhood.com/us/en/careers/openings/",
+        "ats": "greenhouse",
+    },
+    "Coinbase": {
+        "url": "https://www.coinbase.com/careers/positions",
+        "ats": "greenhouse",
+    },
+    "Affirm": {
+        "url": "https://boards.greenhouse.io/affirm",
+        "ats": "greenhouse",
+    },
+    "Brex": {
+        "url": "https://www.brex.com/careers#joblist",
+        "ats": "greenhouse",
+    },
+    "Ramp": {
+        "url": "https://ramp.com/careers#openings",
+        "ats": "greenhouse",
+    },
+    "Chime": {
+        "url": "https://careers.chime.com/c/engineering-jobs",
+        "ats": "greenhouse",
+    },
+    "SoFi": {
+        "url": "https://www.sofi.com/careers/job-openings/",
+        "ats": "greenhouse",
+    },
+    # Cloud/Data Infrastructure
+    "Databricks": {
+        "url": "https://www.databricks.com/company/careers/open-positions",
+        "ats": "greenhouse",
+    },
+    "MongoDB": {
+        "url": "https://www.mongodb.com/careers/jobs",
+        "ats": "greenhouse",
+    },
+    "Elastic": {
+        "url": "https://jobs.elastic.co/jobs/department/engineering",
+        "ats": "greenhouse",
+    },
+    "DigitalOcean": {
+        "url": "https://www.digitalocean.com/careers/jobs",
+        "ats": "greenhouse",
+    },
+    "Grafana": {
+        "url": "https://grafana.com/about/careers/open-positions/",
+        "ats": "lever",
+    },
+    # Dev Tools & Productivity
+    "Figma": {
+        "url": "https://www.figma.com/careers/#job-openings",
+        "ats": "greenhouse",
+    },
+    "Notion": {
+        "url": "https://www.notion.so/careers#702a6c37c14845ae9b51a5e4f5ea4d18",
+        "ats": "lever",
+    },
+    "Postman": {
+        "url": "https://www.postman.com/company/careers/open-positions/",
+        "ats": "greenhouse",
+    },
+    "Atlassian": {
+        "url": "https://www.atlassian.com/company/careers/all-jobs",
+        "ats": "internal",
+    },
+    "Twilio": {
+        "url": "https://www.twilio.com/en-us/company/jobs",
+        "ats": "greenhouse",
+    },
+    "Miro": {
+        "url": "https://miro.com/careers/open-positions/",
+        "ats": "greenhouse",
+    },
+    "Retool": {
+        "url": "https://retool.com/careers#jobs",
+        "ats": "lever",
+    },
+    "Airtable": {
+        "url": "https://airtable.com/careers#openings",
+        "ats": "greenhouse",
+    },
+    # Consumer Tech
+    "Uber": {
+        "url": "https://www.uber.com/us/en/careers/list/?query=software%20engineer",
+        "ats": "internal",
+    },
+    "Lyft": {
+        "url": "https://www.lyft.com/careers#openings",
+        "ats": "greenhouse",
+    },
+    "DoorDash": {
+        "url": "https://careers.doordash.com/jobs/search?category=Engineering",
+        "ats": "internal",
+    },
+    "Instacart": {
+        "url": "https://instacart.careers/job-search/?team=Engineering",
+        "ats": "greenhouse",
+    },
+    "Discord": {
+        "url": "https://discord.com/jobs?team=engineering",
+        "ats": "greenhouse",
+    },
+    "Spotify": {
+        "url": "https://www.lifeatspotify.com/jobs?c=engineering",
+        "ats": "internal",
+    },
+    "Reddit": {
+        "url": "https://www.redditinc.com/careers?team=engineering",
+        "ats": "greenhouse",
+    },
+    "Pinterest": {
+        "url": "https://www.pinterestcareers.com/en/jobs/?team=Engineering",
+        "ats": "greenhouse",
+    },
+    "Snap": {
+        "url": "https://snap.com/en-US/jobs?teams=Engineering",
+        "ats": "internal",
+    },
+    "Twitter": {
+        "url": "https://careers.twitter.com/en/roles.html#702a6c37c14845ae9b51a5e4f5ea4d18",
+        "ats": "internal",
+    },
+    # Seattle Tech
+    "Redfin": {
+        "url": "https://www.redfin.com/about/jobs",
+        "ats": "greenhouse",
+    },
+    "Qualtrics": {
+        "url": "https://www.qualtrics.com/careers/us/en/search-results",
+        "ats": "internal",
+    },
+    # AI/ML Companies
+    "Anthropic": {
+        "url": "https://www.anthropic.com/careers#open-roles",
+        "ats": "greenhouse",
+    },
+    "OpenAI": {
+        "url": "https://openai.com/careers/search",
+        "ats": "greenhouse",
+    },
+    "ScaleAI": {
+        "url": "https://scale.com/careers",
+        "ats": "lever",
+    },
+    "Cohere": {
+        "url": "https://cohere.com/careers#open-roles",
+        "ats": "greenhouse",
+    },
+    "Hugging Face": {
+        "url": "https://huggingface.co/jobs",
+        "ats": "greenhouse",
+    },
+    # Enterprise Software
+    "Salesforce": {
+        "url": "https://careers.salesforce.com/en/jobs/?search=software+engineer",
+        "ats": "internal",
+    },
+    "Adobe": {
+        "url": "https://careers.adobe.com/us/en/search-results?keywords=software%20engineer",
+        "ats": "internal",
+    },
+    "Okta": {
+        "url": "https://www.okta.com/company/careers/#job-openings",
+        "ats": "greenhouse",
+    },
+    "CrowdStrike": {
+        "url": "https://www.crowdstrike.com/careers/job-openings/",
+        "ats": "greenhouse",
+    },
+    "ServiceNow": {
+        "url": "https://careers.servicenow.com/en/jobs/",
+        "ats": "internal",
+    },
+    "Palantir": {
+        "url": "https://www.palantir.com/careers/",
+        "ats": "lever",
+    },
+    "Splunk": {
+        "url": "https://www.splunk.com/en_us/careers.html",
+        "ats": "internal",
+    },
+    "Palo Alto Networks": {
+        "url": "https://jobs.paloaltonetworks.com/en/jobs/",
+        "ats": "internal",
+    },
+    # Quant/Trading
+    "Jane Street": {
+        "url": "https://www.janestreet.com/join-jane-street/open-roles/",
+        "ats": "internal",
+    },
+    "Two Sigma": {
+        "url": "https://www.twosigma.com/careers/open-roles/",
+        "ats": "greenhouse",
+    },
+    "Citadel": {
+        "url": "https://www.citadel.com/careers/open-opportunities/",
+        "ats": "internal",
+    },
+    "HRT": {
+        "url": "https://www.hudsonrivertrading.com/careers/",
+        "ats": "greenhouse",
+    },
+    "DE Shaw": {
+        "url": "https://www.deshaw.com/careers",
+        "ats": "internal",
+    },
+    "Optiver": {
+        "url": "https://optiver.com/working-at-optiver/career-opportunities/",
+        "ats": "greenhouse",
+    },
+    # E-commerce/Retail Tech
+    "Shopify": {
+        "url": "https://www.shopify.com/careers/search?teams%5B%5D=engineering",
+        "ats": "greenhouse",
+    },
+    "Etsy": {
+        "url": "https://careers.etsy.com/global/en/c/engineering-jobs",
+        "ats": "internal",
+    },
+    "Wayfair": {
+        "url": "https://www.wayfair.com/careers/jobs?teamIds=6&gh_jid=",
+        "ats": "greenhouse",
+    },
+    "Chewy": {
+        "url": "https://careers.chewy.com/us/en/search-results?keywords=software",
+        "ats": "internal",
+    },
+    # Gaming
+    "Roblox": {
+        "url": "https://careers.roblox.com/jobs?teams=Engineering",
+        "ats": "greenhouse",
+    },
+    "Epic Games": {
+        "url": "https://www.epicgames.com/site/en-US/careers/jobs",
+        "ats": "greenhouse",
+    },
+    "Riot Games": {
+        "url": "https://www.riotgames.com/en/work-with-us/jobs#702a6c37c14845ae9b51a5e4f5ea4d18",
+        "ats": "greenhouse",
+    },
+    # Misc High-Growth
+    "Gusto": {
+        "url": "https://gusto.com/about/careers#702a6c37c14845ae9b51a5e4f5ea4d18",
+        "ats": "greenhouse",
+    },
+    "Rippling": {
+        "url": "https://www.rippling.com/careers/all-openings",
+        "ats": "greenhouse",
+    },
+    "Navan": {
+        "url": "https://navan.com/careers#702a6c37c14845ae9b51a5e4f5ea4d18",
+        "ats": "greenhouse",
+    },
+    "Zapier": {
+        "url": "https://zapier.com/jobs",
+        "ats": "lever",
+    },
+    "Asana": {
+        "url": "https://asana.com/jobs/all",
+        "ats": "greenhouse",
+    },
 }
 
 # GitHub repositories to monitor
@@ -213,6 +480,11 @@ TARGET_COMPANIES = [
     "planetscale",
     "temporal",
     "snowflake",
+    "databricks",
+    "mongodb",
+    "elastic",
+    "digitalocean",
+    "grafana",
     # Developer Tools
     "github",
     "gitlab",
@@ -221,35 +493,221 @@ TARGET_COMPANIES = [
     "supabase",
     "linear",
     "replit",
+    "figma",
+    "notion",
+    "postman",
+    "atlassian",
+    "twilio",
+    "miro",
+    "retool",
+    "airtable",
+    "zapier",
+    "asana",
     # Seattle Companies
     "expedia",
     "zillow",
     "f5",
+    "redfin",
+    "qualtrics",
     # High-Growth Startups
     "fly.io",
     "flyio",
     "railway",
     "render",
-    # Existing from before
-    "airbnb",
-    "rubrik",
+    # Fintech
+    "plaid",
+    "robinhood",
     "coinbase",
-    "databricks",
-    "figma",
-    "notion",
-    "discord",
-    "snap",
+    "affirm",
+    "brex",
+    "ramp",
+    "chime",
+    "sofi",
+    # Consumer Tech
+    "airbnb",
     "uber",
     "lyft",
     "doordash",
     "instacart",
-    "robinhood",
-    "plaid",
+    "discord",
+    "spotify",
+    "reddit",
+    "pinterest",
+    "snap",
+    "snapchat",
+    "twitter",
+    "x",
+    # AI/ML Companies
+    "anthropic",
+    "openai",
+    "scale",
+    "scaleai",
+    "cohere",
+    "hugging face",
+    "huggingface",
+    # Enterprise Software
+    "salesforce",
+    "adobe",
+    "okta",
+    "crowdstrike",
+    "servicenow",
+    "palantir",
+    "splunk",
+    "palo alto networks",
+    "paloalto",
+    "rubrik",
+    # Quant/Trading
+    "jane street",
+    "janestreet",
+    "two sigma",
+    "twosigma",
+    "citadel",
+    "hrt",
+    "hudson river trading",
+    "de shaw",
+    "deshaw",
+    "optiver",
+    # E-commerce/Retail
+    "shopify",
+    "etsy",
+    "wayfair",
+    "chewy",
+    # Gaming
+    "roblox",
+    "epic games",
+    "epicgames",
+    "riot games",
+    "riot",
+    # HR/Payroll Tech
+    "gusto",
+    "rippling",
+    "navan",
+    "tripactions",
 ]
 
 # Seniority exclusions - keywords that indicate non-entry-level positions
 SENIORITY_EXCLUSIONS = [
     "senior", "staff", "principal", "lead", "manager", "director", "sr.", "sr ",
+]
+
+# Title exclusions - keywords that indicate non-software engineering roles
+# Note: Data/ML/AI Engineer and DevOps/SRE/Platform Engineer are intentionally allowed
+TITLE_EXCLUSIONS = [
+    # Sales-adjacent roles
+    "sales engineer",
+    "solutions engineer",
+    "solutions architect",
+    "customer engineer",
+    "customer success",
+    "field engineer",
+    "pre-sales",
+    "presales",
+    # Mobile-specific (user wants web/backend focus)
+    "android engineer",
+    "android developer",
+    "ios engineer",
+    "ios developer",
+    "mobile engineer",
+    "mobile developer",
+    # QA/Test roles
+    "qa engineer",
+    "quality assurance",
+    "test engineer",
+    "sdet",
+    "automation engineer",
+    "quality engineer",
+    # Hardware/Embedded (not software)
+    "hardware engineer",
+    "embedded engineer",
+    "firmware engineer",
+    "electrical engineer",
+    "mechanical engineer",
+    "manufacturing engineer",
+    # Support/Operations (not development)
+    "support engineer",
+    "it engineer",
+    "network engineer",
+    "systems administrator",
+    "helpdesk",
+    # Other non-SWE
+    "security engineer",
+    "application engineer",
+    "implementation engineer",
+    "integration engineer",
+]
+
+# Blocked locations - explicitly reject jobs in these locations
+BLOCKED_LOCATIONS = [
+    # UK
+    "london",
+    "cambridge",
+    "manchester",
+    "edinburgh",
+    "bristol",
+    "oxford",
+    "united kingdom",
+    "uk",
+    "england",
+    "scotland",
+    # Europe
+    "germany",
+    "berlin",
+    "munich",
+    "frankfurt",
+    "france",
+    "paris",
+    "ireland",
+    "dublin",
+    "netherlands",
+    "amsterdam",
+    "spain",
+    "madrid",
+    "barcelona",
+    "italy",
+    "switzerland",
+    "zurich",
+    "poland",
+    "warsaw",
+    "sweden",
+    "stockholm",
+    "denmark",
+    "copenhagen",
+    # India
+    "india",
+    "bangalore",
+    "bengaluru",
+    "hyderabad",
+    "mumbai",
+    "pune",
+    "delhi",
+    "gurgaon",
+    "noida",
+    "chennai",
+    # APAC
+    "singapore",
+    "japan",
+    "tokyo",
+    "australia",
+    "sydney",
+    "melbourne",
+    "china",
+    "beijing",
+    "shanghai",
+    "hong kong",
+    "taiwan",
+    "korea",
+    "seoul",
+    # Canada
+    "canada",
+    "toronto",
+    "vancouver",
+    "montreal",
+    "ottawa",
+    "waterloo",
+    # Latin America
+    "brazil",
+    "mexico",
+    "argentina",
 ]
 
 # Seniority exclusion patterns - regex patterns for detecting senior roles
