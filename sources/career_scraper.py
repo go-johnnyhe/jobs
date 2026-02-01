@@ -52,6 +52,8 @@ class CareerScraper:
             return self._scrape_greenhouse(company_name, url)
         elif ats == "lever":
             return self._scrape_lever(company_name, url)
+        elif ats == "workday":
+            return self._scrape_workday(company_name, url)
         else:
             return self._scrape_generic(company_name, url)
 
@@ -237,6 +239,105 @@ class CareerScraper:
             print(f"  Error fetching {url}: {e}")
 
         return jobs
+
+    def _scrape_workday(self, company_name: str, url: str) -> list[Job]:
+        """Scrape jobs from Workday-powered career pages (CXS API)."""
+        jobs = []
+
+        tenant_site = self._extract_workday_tenant_site(url)
+        if not tenant_site:
+            return jobs
+
+        tenant, site, base = tenant_site
+        api_url = f"{base}/wday/cxs/{tenant}/{site}/jobs"
+
+        limit = 50
+        offset = 0
+        total = None
+
+        while True:
+            payload = {
+                "limit": limit,
+                "offset": offset,
+            }
+
+            try:
+                response = self.session.post(
+                    api_url,
+                    json=payload,
+                    timeout=30,
+                    headers={"Content-Type": "application/json"},
+                )
+                response.raise_for_status()
+                data = response.json()
+            except requests.RequestException as e:
+                print(f"  Error fetching Workday API for {company_name}: {e}")
+                break
+
+            postings = data.get("jobPostings") or data.get("jobPostingsV2") or []
+            if not postings:
+                break
+
+            for posting in postings:
+                job = self._parse_workday_job(company_name, posting, base)
+                if job and self._matches_criteria(job):
+                    jobs.append(job)
+
+            if total is None:
+                total = data.get("total", None)
+
+            offset += len(postings)
+            if total is not None and offset >= total:
+                break
+
+        return jobs
+
+    def _extract_workday_tenant_site(self, url: str) -> Optional[tuple[str, str, str]]:
+        """Extract Workday tenant and site from a Workday jobs URL."""
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(url)
+            host = parsed.netloc
+            if not host.endswith(".myworkdayjobs.com"):
+                return None
+
+            # Host is usually like "{tenant}.wd5.myworkdayjobs.com"
+            tenant = host.split(".")[0]
+            path_parts = [p for p in parsed.path.split("/") if p]
+            if not path_parts:
+                return None
+
+            # First path segment is the site (e.g., "Zillow_Group_External")
+            site = path_parts[0]
+            base = f"https://{host}"
+            return tenant, site, base
+        except Exception:
+            return None
+
+    def _parse_workday_job(self, company_name: str, posting: dict, base_url: str) -> Optional[Job]:
+        """Parse a Workday job posting from CXS API."""
+        title = posting.get("title") or posting.get("jobTitle") or ""
+        url_path = posting.get("externalPath") or posting.get("externalUrl") or ""
+        location = (
+            posting.get("locationsText")
+            or posting.get("location")
+            or posting.get("primaryLocation")
+            or ""
+        )
+
+        if not title or not url_path:
+            return None
+
+        from urllib.parse import urljoin
+        url = urljoin(base_url, url_path)
+
+        return Job(
+            company=company_name,
+            title=title,
+            url=url,
+            location=location,
+            source="career_page",
+        )
 
     def _looks_like_job_link(self, href: str, text: str) -> bool:
         """Check if a link appears to be a job posting."""
