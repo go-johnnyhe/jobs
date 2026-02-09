@@ -1,7 +1,6 @@
 """GitHub repository tracker for job listings."""
 
 import re
-from dataclasses import dataclass
 from typing import Optional
 
 import requests
@@ -9,39 +8,15 @@ from bs4 import BeautifulSoup
 
 from config import GITHUB_REPOS, TARGET_COMPANIES
 from filters import matches_job_criteria
-
-
-@dataclass
-class Job:
-    """Represents a job listing."""
-    company: str
-    title: str
-    url: str
-    location: str
-    source: str
-    date_posted: Optional[str] = None
-
-    def to_dict(self) -> dict:
-        return {
-            "company": self.company,
-            "title": self.title,
-            "url": self.url,
-            "location": self.location,
-            "source": self.source,
-            "date_posted": self.date_posted,
-        }
-
-    @property
-    def unique_id(self) -> str:
-        """Generate a unique ID for deduplication."""
-        return f"{self.company}|{self.title}|{self.url}"
+from http_client import create_session
+from models import Job
 
 
 class GitHubTracker:
     """Tracks job listings from GitHub repositories."""
 
     def __init__(self):
-        self.session = requests.Session()
+        self.session = create_session()
         self.session.headers.update({
             "Accept": "application/vnd.github.v3.raw",
             "User-Agent": "JobTracker/1.0",
@@ -166,9 +141,11 @@ class GitHubTracker:
     def _matches_criteria(self, job: Job) -> bool:
         """Check if a job matches our filtering criteria."""
         # Check if company is in our target list
+        # Short targets (len <= 2) require exact match to avoid false positives
+        # (e.g. "f5" matching "Flexport")
         company_lower = job.company.lower()
         company_match = any(
-            target in company_lower
+            (company_lower == target if len(target) <= 2 else target in company_lower)
             for target in TARGET_COMPANIES
         )
 

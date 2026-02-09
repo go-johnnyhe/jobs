@@ -23,7 +23,16 @@ Automated job tracker for new grad software engineering positions. Sends Discord
 ## Commands
 
 ```bash
-python main.py              # Check for jobs
-python main.py --notify     # Check and send Discord alerts
-python main.py --stats      # View statistics
+pip install -r requirements.txt  # Install dependencies
+python main.py                   # Check for jobs
+python main.py --notify              # Check and send Discord alerts
+python main.py --notify --dry-run    # Print Discord payload without sending
+python main.py --stats               # View statistics
+```
+
+## Development
+
+```bash
+pip install -r requirements-dev.txt  # Install dev dependencies (adds pytest)
+python -m pytest tests/ -v           # Run all tests
 ```

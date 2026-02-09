@@ -37,6 +37,15 @@ class JobStorage:
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_notified ON seen_jobs(notified)
             """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_company ON seen_jobs(company)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_first_seen ON seen_jobs(first_seen)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_notified_first_seen ON seen_jobs(notified, first_seen)
+            """)
             conn.commit()
 
     def is_new(self, job) -> bool:

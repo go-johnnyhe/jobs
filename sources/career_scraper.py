@@ -6,23 +6,17 @@ from typing import Optional
 import requests
 from bs4 import BeautifulSoup
 
-from config import COMPANIES, TITLE_KEYWORDS, ROLE_KEYWORDS
-from filters import (
-    has_blocked_location,
-    has_excluded_title,
-    has_new_grad_indicator,
-    is_senior_level,
-    matches_job_criteria,
-    matches_location,
-)
-from .github_tracker import Job
+from config import COMPANIES, ROLE_KEYWORDS
+from filters import matches_job_criteria
+from http_client import create_session
+from models import Job
 
 
 class CareerScraper:
     """Scrapes job listings directly from company career pages."""
 
     def __init__(self):
-        self.session = requests.Session()
+        self.session = create_session()
         self.session.headers.update({
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -371,41 +365,6 @@ class CareerScraper:
     def _matches_criteria(self, job: Job) -> bool:
         """Check if a job matches our filtering criteria."""
         title_lower = job.title.lower()
-
-        # Check for role keywords first
-        has_role_keyword = any(kw in title_lower for kw in ROLE_KEYWORDS)
-        if not has_role_keyword:
+        if not any(kw in title_lower for kw in ROLE_KEYWORDS):
             return False
-
-        # Check title exclusions (non-SWE roles like Sales Engineer, Android Engineer)
-        if has_excluded_title(title_lower):
-            return False
-
-        # Check for new grad / entry level keywords
-        is_new_grad = has_new_grad_indicator(title_lower)
-
-        # Check seniority - always exclude senior roles unless explicitly new grad
-        if is_senior_level(title_lower):
-            # Exception: if it has new grad keywords AND level 1, allow it
-            if is_new_grad:
-                import re
-                has_level_one = bool(re.search(r'\b(?:sde|swe|engineer|developer)\s*[i1]\b', title_lower, re.IGNORECASE))
-                if not has_level_one:
-                    return False
-            else:
-                return False
-
-        # Check blocked locations (UK, India, Europe, Canada, etc.)
-        if has_blocked_location(job.location):
-            return False
-
-        # Check preferred locations (only if location is specified)
-        if job.location and not matches_location(job.location):
-            return False
-
-        # For jobs from generic scraping (empty location), require new grad keywords
-        # This prevents letting through all jobs without location info
-        if not job.location and not is_new_grad:
-            return False
-
-        return True
+        return matches_job_criteria(job, require_location=True)

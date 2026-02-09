@@ -1,7 +1,6 @@
 """Centralized filtering logic for job listings."""
 
 import re
-from typing import TYPE_CHECKING
 
 from config import (
     BLOCKED_LOCATIONS,
@@ -11,9 +10,7 @@ from config import (
     TITLE_EXCLUSIONS,
     TITLE_KEYWORDS,
 )
-
-if TYPE_CHECKING:
-    from sources.github_tracker import Job
+from models import Job
 
 
 def matches_location(location: str) -> bool:
@@ -181,7 +178,7 @@ def has_new_grad_indicator(title: str) -> bool:
 
 
 def matches_job_criteria(
-    job: "Job",
+    job: Job,
     check_title_keywords: bool = False,
     require_location: bool = False,
 ) -> bool:

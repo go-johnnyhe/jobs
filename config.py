@@ -457,133 +457,32 @@ PREFERRED_LOCATIONS = [
     "menlo park",
 ]
 
-# Companies to specifically track (for filtering GitHub repo results)
-TARGET_COMPANIES = [
-    # Big Tech
-    "google",
-    "meta",
-    "facebook",
-    "amazon",
-    "apple",
-    "netflix",
-    "microsoft",
-    "stripe",
-    "block",
-    "square",
-    # Cloud & Infrastructure
-    "cloudflare",
-    "hashicorp",
-    "datadog",
-    "confluent",
-    "cockroach",
-    "cockroachlabs",
-    "planetscale",
-    "temporal",
-    "snowflake",
-    "databricks",
-    "mongodb",
-    "elastic",
-    "digitalocean",
-    "grafana",
-    # Developer Tools
-    "github",
-    "gitlab",
-    "vercel",
-    "netlify",
-    "supabase",
-    "linear",
-    "replit",
-    "figma",
-    "notion",
-    "postman",
-    "atlassian",
-    "twilio",
-    "miro",
-    "retool",
-    "airtable",
-    "zapier",
-    "asana",
-    # Seattle Companies
-    "expedia",
-    "zillow",
-    "f5",
-    "redfin",
-    "qualtrics",
-    # High-Growth Startups
-    "fly.io",
-    "flyio",
-    "railway",
-    "render",
-    # Fintech
-    "plaid",
-    "robinhood",
-    "coinbase",
-    "affirm",
-    "brex",
-    "ramp",
-    "chime",
-    "sofi",
-    # Consumer Tech
-    "airbnb",
-    "uber",
-    "lyft",
-    "doordash",
-    "instacart",
-    "discord",
-    "spotify",
-    "reddit",
-    "pinterest",
-    "snap",
-    "snapchat",
-    "twitter",
-    "x",
-    # AI/ML Companies
-    "anthropic",
-    "openai",
-    "scale",
-    "scaleai",
-    "cohere",
-    "hugging face",
-    "huggingface",
-    # Enterprise Software
-    "salesforce",
-    "adobe",
-    "okta",
-    "crowdstrike",
-    "servicenow",
-    "palantir",
-    "splunk",
-    "palo alto networks",
-    "paloalto",
-    "rubrik",
-    # Quant/Trading
-    "jane street",
-    "janestreet",
-    "two sigma",
-    "twosigma",
-    "citadel",
-    "hrt",
-    "hudson river trading",
-    "de shaw",
-    "deshaw",
-    "optiver",
-    # E-commerce/Retail
-    "shopify",
-    "etsy",
-    "wayfair",
-    "chewy",
-    # Gaming
-    "roblox",
-    "epic games",
-    "epicgames",
-    "riot games",
-    "riot",
-    # HR/Payroll Tech
-    "gusto",
-    "rippling",
-    "navan",
-    "tripactions",
-]
+# Aliases for company matching on GitHub repo results.
+# Keys must match COMPANIES keys. Values are extra lowercase match strings.
+COMPANY_ALIASES = {
+    "Meta": ["facebook"],
+    "Block": ["square"],
+    "CockroachLabs": ["cockroach"],
+    "Flyio": ["fly.io"],
+    "Snap": ["snapchat"],
+    "Twitter": ["twitter"],
+    "ScaleAI": ["scale"],
+    "Hugging Face": ["huggingface"],
+    "Palo Alto Networks": ["paloalto"],
+    "Jane Street": ["janestreet"],
+    "Two Sigma": ["twosigma"],
+    "HRT": ["hudson river trading"],
+    "DE Shaw": ["deshaw"],
+    "Epic Games": ["epicgames"],
+    "Riot Games": ["riot"],
+    "Navan": ["tripactions"],
+}
+
+# Auto-derived from COMPANIES keys + COMPANY_ALIASES values
+TARGET_COMPANIES = sorted(set(
+    [name.lower() for name in COMPANIES]
+    + [alias for aliases in COMPANY_ALIASES.values() for alias in aliases]
+))
 
 # Seniority exclusions - keywords that indicate non-entry-level positions
 SENIORITY_EXCLUSIONS = [

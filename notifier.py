@@ -6,6 +6,7 @@ from typing import Optional
 import requests
 
 from config import DISCORD_WEBHOOK_URL
+from http_client import create_session
 
 
 class DiscordNotifier:
@@ -13,7 +14,10 @@ class DiscordNotifier:
 
     def __init__(self, webhook_url: Optional[str] = None):
         self.webhook_url = webhook_url or DISCORD_WEBHOOK_URL
-        self.session = requests.Session()
+        # Disable all POST retries for Discord webhooks to avoid
+        # duplicate messages (Discord may process POST before returning error,
+        # and connection/timeout retries on POST can also duplicate)
+        self.session = create_session(status_forcelist=(), allowed_methods=("GET",))
 
     def notify(self, jobs: list, dry_run: bool = False) -> bool:
         """Send job notifications to Discord."""
