@@ -1,10 +1,9 @@
 """SQLite storage for tracking seen job listings."""
 
 import sqlite3
-from datetime import datetime
-from typing import Optional
+from typing import Optional, Sequence
 
-from config import DATABASE_PATH
+from config import DATABASE_PATH, SOURCE_FAILURE_ALERT_THRESHOLDS
 
 
 class JobStorage:
@@ -46,7 +45,34 @@ class JobStorage:
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_notified_first_seen ON seen_jobs(notified, first_seen)
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS source_health (
+                    source TEXT PRIMARY KEY,
+                    consecutive_failures INTEGER NOT NULL DEFAULT 0,
+                    last_error TEXT,
+                    last_failure_at TIMESTAMP,
+                    last_success_at TIMESTAMP,
+                    last_alert_failure_count INTEGER NOT NULL DEFAULT 0,
+                    pending_recovery_after INTEGER NOT NULL DEFAULT 0
+                )
+            """)
+            columns = {
+                row[1]
+                for row in conn.execute("PRAGMA table_info(source_health)")
+            }
+            if "pending_recovery_after" not in columns:
+                conn.execute("""
+                    ALTER TABLE source_health
+                    ADD COLUMN pending_recovery_after INTEGER NOT NULL DEFAULT 0
+                """)
             conn.commit()
+
+    def _normalize_thresholds(self, thresholds: Optional[Sequence[int]]) -> list[int]:
+        values = thresholds if thresholds is not None else SOURCE_FAILURE_ALERT_THRESHOLDS
+        normalized = sorted({t for t in values if t > 0})
+        if not normalized:
+            raise ValueError("At least one positive alert threshold is required")
+        return normalized
 
     def is_new(self, job) -> bool:
         """Check if a job has been seen before."""
@@ -139,4 +165,140 @@ class JobStorage:
                 DELETE FROM seen_jobs
                 WHERE first_seen < datetime('now', ? || ' days')
             """, (f"-{days}",))
+            conn.commit()
+
+    def record_source_failure(
+        self,
+        source: str,
+        error: str,
+        alert_thresholds: Optional[Sequence[int]] = None,
+    ) -> tuple[int, Optional[int]]:
+        """
+        Record a source failure and return (consecutive_failures, alert_threshold).
+
+        alert_threshold is the threshold value that should be alerted now, or None.
+        Alert state is not confirmed until confirm_source_failure_alert() is called.
+        """
+        thresholds = self._normalize_thresholds(alert_thresholds)
+
+        with sqlite3.connect(self.db_path) as conn:
+            row = conn.execute(
+                """
+                SELECT consecutive_failures, last_alert_failure_count
+                FROM source_health
+                WHERE source = ?
+                """,
+                (source,),
+            ).fetchone()
+
+            previous_failures = row[0] if row else 0
+            stored_alert_failure_count = row[1] if row else 0
+            # Rearm thresholds after any successful run (new streak starts at 1).
+            last_alert_failure_count = 0 if previous_failures == 0 else stored_alert_failure_count
+            consecutive_failures = previous_failures + 1
+
+            eligible_thresholds = [
+                t for t in thresholds
+                if t <= consecutive_failures and t > last_alert_failure_count
+            ]
+            alert_threshold = max(eligible_thresholds) if eligible_thresholds else None
+
+            conn.execute(
+                """
+                INSERT INTO source_health
+                (source, consecutive_failures, last_error, last_failure_at, last_alert_failure_count, pending_recovery_after)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?, 0)
+                ON CONFLICT(source) DO UPDATE SET
+                    consecutive_failures = excluded.consecutive_failures,
+                    last_error = excluded.last_error,
+                    last_failure_at = excluded.last_failure_at,
+                    last_alert_failure_count = excluded.last_alert_failure_count,
+                    pending_recovery_after = 0
+                """,
+                (source, consecutive_failures, error, last_alert_failure_count),
+            )
+            conn.commit()
+
+        return consecutive_failures, alert_threshold
+
+    def confirm_source_failure_alert(self, source: str, alert_failure_count: int):
+        """Persist that a failure alert was successfully sent up to this threshold."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                """
+                UPDATE source_health
+                SET last_alert_failure_count = CASE
+                    WHEN last_alert_failure_count < ? THEN ?
+                    ELSE last_alert_failure_count
+                END
+                WHERE source = ?
+                """,
+                (alert_failure_count, alert_failure_count, source),
+            )
+            conn.commit()
+
+    def record_source_success(
+        self,
+        source: str,
+        alert_thresholds: Optional[Sequence[int]] = None,
+    ) -> int:
+        """
+        Record source success and return failed-run count for recovery alert.
+
+        Recovery alert state remains pending until confirm_source_recovery_alert()
+        is called, so transient notifier failures do not lose alerts.
+        """
+        thresholds = self._normalize_thresholds(alert_thresholds)
+        min_threshold = min(thresholds)
+
+        with sqlite3.connect(self.db_path) as conn:
+            row = conn.execute(
+                """
+                SELECT consecutive_failures, last_alert_failure_count, pending_recovery_after
+                FROM source_health
+                WHERE source = ?
+                """,
+                (source,),
+            ).fetchone()
+
+            previous_failures = row[0] if row else 0
+            last_alert_failure_count = row[1] if row else 0
+            pending_recovery_after = row[2] if row else 0
+
+            if pending_recovery_after > 0:
+                recovery_after = pending_recovery_after
+            elif previous_failures >= min_threshold and last_alert_failure_count > 0:
+                recovery_after = previous_failures
+            else:
+                recovery_after = 0
+
+            conn.execute(
+                """
+                INSERT INTO source_health
+                (source, consecutive_failures, last_error, last_success_at, last_alert_failure_count, pending_recovery_after)
+                VALUES (?, 0, NULL, CURRENT_TIMESTAMP, 0, ?)
+                ON CONFLICT(source) DO UPDATE SET
+                    consecutive_failures = 0,
+                    last_error = NULL,
+                    last_success_at = excluded.last_success_at,
+                    last_alert_failure_count = 0,
+                    pending_recovery_after = excluded.pending_recovery_after
+                """,
+                (source, recovery_after),
+            )
+            conn.commit()
+
+        return recovery_after
+
+    def confirm_source_recovery_alert(self, source: str):
+        """Clear pending recovery alert state after successful notification."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                """
+                UPDATE source_health
+                SET pending_recovery_after = 0
+                WHERE source = ?
+                """,
+                (source,),
+            )
             conn.commit()

@@ -484,6 +484,13 @@ TARGET_COMPANIES = sorted(set(
     + [alias for aliases in COMPANY_ALIASES.values() for alias in aliases]
 ))
 
+# Consecutive-failure counts that trigger source health alerts.
+SOURCE_FAILURE_ALERT_THRESHOLDS = [3, 6, 12]
+
+# Career source is considered healthy only if enough company scrapes succeed.
+CAREERS_MIN_HEALTHY_SUCCESS_RATE = 0.25
+CAREERS_MIN_HEALTHY_SUCCESSES = 5
+
 # Seniority exclusions - keywords that indicate non-entry-level positions
 SENIORITY_EXCLUSIONS = [
     "senior", "staff", "principal", "lead", "manager", "director", "sr.", "sr ",

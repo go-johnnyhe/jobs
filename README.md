@@ -1,6 +1,7 @@
 # Job Tracker
 
 Automated job tracker for new grad software engineering positions. Sends Discord alerts hourly via GitHub Actions.
+Includes source-health alerts when a job source fails repeatedly.
 
 ## Monitored Companies
 

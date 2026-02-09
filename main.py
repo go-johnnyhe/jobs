@@ -7,6 +7,7 @@ import sys
 from sources import GitHubTracker, CareerScraper
 from storage import JobStorage
 from notifier import DiscordNotifier
+from config import SOURCE_FAILURE_ALERT_THRESHOLDS
 
 
 def main():
@@ -88,22 +89,58 @@ def main():
 
     all_jobs = []
     new_jobs = []
+    source_statuses = []
 
     # Fetch from GitHub repos
     if not args.skip_github:
         print("Fetching from GitHub repositories...")
         github_tracker = GitHubTracker()
-        github_jobs = github_tracker.fetch_jobs()
+        github_jobs, github_healthy, github_error = github_tracker.fetch_jobs_with_status()
         print(f"  Found {len(github_jobs)} matching jobs from GitHub\n")
         all_jobs.extend(github_jobs)
+        source_statuses.append(("github", github_healthy, github_error))
 
     # Fetch from career pages
     if not args.skip_careers:
         print("Scraping career pages...")
         career_scraper = CareerScraper()
-        career_jobs = career_scraper.fetch_jobs()
+        career_jobs, careers_healthy, careers_error = career_scraper.fetch_jobs_with_status()
         print(f"\n  Found {len(career_jobs)} matching jobs from career pages\n")
         all_jobs.extend(career_jobs)
+        source_statuses.append(("careers", careers_healthy, careers_error))
+
+    # Update source health state and emit alerts at configured thresholds
+    for source_name, healthy, error in source_statuses:
+        if healthy:
+            recovered_after = storage.record_source_success(
+                source_name,
+                alert_thresholds=SOURCE_FAILURE_ALERT_THRESHOLDS,
+            )
+            if recovered_after and args.notify:
+                print(f"Source recovered: {source_name} (after {recovered_after} failed runs)")
+                sent = notifier.notify_source_recovery(
+                    source_name,
+                    recovered_after,
+                    dry_run=args.dry_run,
+                )
+                if sent and not args.dry_run:
+                    storage.confirm_source_recovery_alert(source_name)
+        else:
+            failures, alert_threshold = storage.record_source_failure(
+                source_name,
+                error or "unknown source failure",
+                alert_thresholds=SOURCE_FAILURE_ALERT_THRESHOLDS,
+            )
+            print(f"Source failure recorded: {source_name} ({failures} consecutive)")
+            if alert_threshold and args.notify:
+                sent = notifier.notify_source_failure(
+                    source_name,
+                    failures,
+                    error or "unknown source failure",
+                    dry_run=args.dry_run,
+                )
+                if sent and not args.dry_run:
+                    storage.confirm_source_failure_alert(source_name, alert_threshold)
 
     # Check for new jobs
     print("Checking for new jobs...")

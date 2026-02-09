@@ -17,6 +17,9 @@ class GitHubTracker:
 
     def __init__(self):
         self.session = create_session()
+        self.last_errors: list[str] = []
+        self.last_attempted_repos = 0
+        self.last_successful_repos = 0
         self.session.headers.update({
             "Accept": "application/vnd.github.v3.raw",
             "User-Agent": "JobTracker/1.0",
@@ -24,15 +27,30 @@ class GitHubTracker:
 
     def fetch_jobs(self) -> list[Job]:
         """Fetch all jobs from configured GitHub repositories."""
+        jobs, _, _ = self.fetch_jobs_with_status()
+        return jobs
+
+    def fetch_jobs_with_status(self) -> tuple[list[Job], bool, str]:
+        """Fetch jobs and return (jobs, healthy, error_summary)."""
         all_jobs = []
+        self.last_errors = []
+        self.last_attempted_repos = 0
+        self.last_successful_repos = 0
 
         for repo_config in GITHUB_REPOS:
-            jobs = self._fetch_from_repo(repo_config)
+            self.last_attempted_repos += 1
+            jobs, success, error = self._fetch_from_repo(repo_config)
             all_jobs.extend(jobs)
+            if success:
+                self.last_successful_repos += 1
+            elif error:
+                self.last_errors.append(error)
 
-        return all_jobs
+        healthy = self.last_attempted_repos == 0 or self.last_successful_repos > 0
+        error_summary = "; ".join(self.last_errors[:3])
+        return all_jobs, healthy, error_summary
 
-    def _fetch_from_repo(self, repo_config: dict) -> list[Job]:
+    def _fetch_from_repo(self, repo_config: dict) -> tuple[list[Job], bool, str]:
         """Fetch jobs from a single GitHub repository."""
         owner = repo_config["owner"]
         repo = repo_config["repo"]
@@ -45,10 +63,10 @@ class GitHubTracker:
             response.raise_for_status()
             content = response.text
 
-            return self._parse_simplify_readme(content)
+            return self._parse_simplify_readme(content), True, ""
         except requests.RequestException as e:
             print(f"Error fetching from {owner}/{repo}: {e}")
-            return []
+            return [], False, f"{owner}/{repo}: {e}"
 
     def _parse_simplify_readme(self, content: str) -> list[Job]:
         """Parse the SimplifyJobs README.md format (HTML tables)."""

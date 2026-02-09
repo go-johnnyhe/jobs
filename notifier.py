@@ -46,12 +46,7 @@ class DiscordNotifier:
             return True
 
         try:
-            response = self.session.post(
-                self.webhook_url,
-                json=payload,
-                timeout=30,
-            )
-            response.raise_for_status()
+            self._send_payload(payload)
             print(f"Successfully sent notification for {len(jobs)} jobs")
 
             # If there are more than 10 jobs, send additional messages
@@ -75,15 +70,117 @@ class DiscordNotifier:
         }
 
         try:
-            response = self.session.post(
-                self.webhook_url,
-                json=payload,
-                timeout=30,
-            )
-            response.raise_for_status()
+            self._send_payload(payload)
             return True
         except requests.RequestException:
             return False
+
+    def notify_source_failure(
+        self,
+        source: str,
+        consecutive_failures: int,
+        error: Optional[str],
+        dry_run: bool = False,
+    ) -> bool:
+        """Send an alert when a source has repeated failures."""
+        if not self.webhook_url:
+            print("No Discord webhook URL configured")
+            return False
+
+        payload = {
+            "content": f"[Source alert] `{source}` has repeated failures",
+            "embeds": [
+                {
+                    "title": "Job Source Failure",
+                    "color": 0xED4245,
+                    "fields": [
+                        {
+                            "name": "Source",
+                            "value": source,
+                            "inline": True,
+                        },
+                        {
+                            "name": "Consecutive failures",
+                            "value": str(consecutive_failures),
+                            "inline": True,
+                        },
+                        {
+                            "name": "Last error",
+                            "value": (error or "Unknown error")[:1024],
+                            "inline": False,
+                        },
+                    ],
+                }
+            ],
+        }
+
+        if dry_run:
+            print("Dry run - would send source failure alert:")
+            print(json.dumps(payload, indent=2))
+            return True
+
+        try:
+            self._send_payload(payload)
+            print(f"Sent source failure alert for {source} ({consecutive_failures} consecutive)")
+            return True
+        except requests.RequestException as e:
+            print(f"Error sending source failure alert: {e}")
+            return False
+
+    def notify_source_recovery(
+        self,
+        source: str,
+        recovered_after: int,
+        dry_run: bool = False,
+    ) -> bool:
+        """Send an alert when a previously failing source recovers."""
+        if not self.webhook_url:
+            print("No Discord webhook URL configured")
+            return False
+
+        payload = {
+            "content": f"[Source recovery] `{source}` is healthy again",
+            "embeds": [
+                {
+                    "title": "Job Source Recovery",
+                    "color": 0x57F287,
+                    "fields": [
+                        {
+                            "name": "Source",
+                            "value": source,
+                            "inline": True,
+                        },
+                        {
+                            "name": "Recovered after",
+                            "value": f"{recovered_after} failed run(s)",
+                            "inline": True,
+                        },
+                    ],
+                }
+            ],
+        }
+
+        if dry_run:
+            print("Dry run - would send source recovery alert:")
+            print(json.dumps(payload, indent=2))
+            return True
+
+        try:
+            self._send_payload(payload)
+            print(f"Sent source recovery alert for {source}")
+            return True
+        except requests.RequestException as e:
+            print(f"Error sending source recovery alert: {e}")
+            return False
+
+    def _send_payload(self, payload: dict):
+        """Send a Discord webhook payload and raise on failure."""
+        response = self.session.post(
+            self.webhook_url,
+            json=payload,
+            timeout=30,
+        )
+        response.raise_for_status()
 
     def _build_embed(self, job) -> dict:
         """Build a Discord embed for a job listing."""

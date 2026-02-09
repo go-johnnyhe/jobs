@@ -84,3 +84,75 @@ class TestGetStats:
         assert stats["pending_notification"] == 1
         assert stats["by_company"]["A"] == 2
         assert stats["by_company"]["B"] == 1
+
+
+class TestSourceHealth:
+    def test_failure_threshold_alerts_require_confirmation(self, db):
+        thresholds = [2, 4]
+
+        assert db.record_source_failure("github", "timeout", thresholds) == (1, None)
+        assert db.record_source_failure("github", "timeout", thresholds) == (2, 2)
+        # Alert repeats until confirmation persists alert state.
+        assert db.record_source_failure("github", "timeout", thresholds) == (3, 2)
+        db.confirm_source_failure_alert("github", 2)
+        assert db.record_source_failure("github", "timeout", thresholds) == (4, 4)
+        db.confirm_source_failure_alert("github", 4)
+        assert db.record_source_failure("github", "timeout", thresholds) == (5, None)
+
+    def test_recovery_alert_pending_until_confirmed(self, db):
+        for _ in range(3):
+            failures, threshold = db.record_source_failure("careers", "dns", [3])
+        assert (failures, threshold) == (3, 3)
+        db.confirm_source_failure_alert("careers", 3)
+
+        assert db.record_source_success("careers", [3]) == 3
+        # Retry recovery alert on subsequent healthy runs until confirmed.
+        assert db.record_source_success("careers", [3]) == 3
+        db.confirm_source_recovery_alert("careers")
+        assert db.record_source_success("careers", [3]) == 0
+
+    def test_recovery_not_alerted_before_threshold(self, db):
+        db.record_source_failure("github", "timeout", [3])
+        db.record_source_failure("github", "timeout", [3])
+
+        assert db.record_source_success("github", [3]) == 0
+
+    def test_thresholds_rearm_after_recovery(self, db):
+        for _ in range(3):
+            failures, threshold = db.record_source_failure("github", "timeout", [3])
+        assert (failures, threshold) == (3, 3)
+        db.confirm_source_failure_alert("github", 3)
+
+        assert db.record_source_success("github", [3]) == 3
+        db.confirm_source_recovery_alert("github")
+
+        assert db.record_source_failure("github", "timeout", [3]) == (1, None)
+        assert db.record_source_failure("github", "timeout", [3]) == (2, None)
+        assert db.record_source_failure("github", "timeout", [3]) == (3, 3)
+
+    def test_sources_tracked_independently(self, db):
+        assert db.record_source_failure("github", "timeout", [2]) == (1, None)
+        assert db.record_source_failure("careers", "dns", [2]) == (1, None)
+        assert db.record_source_failure("github", "timeout", [2]) == (2, 2)
+        assert db.record_source_failure("careers", "dns", [2]) == (2, 2)
+
+    def test_first_time_success_does_not_emit_recovery(self, db):
+        assert db.record_source_success("github", [3]) == 0
+
+    def test_multi_threshold_recovery_returns_highest_failure_streak(self, db):
+        thresholds = [3, 6]
+        for _ in range(3):
+            failures, threshold = db.record_source_failure("github", "timeout", thresholds)
+        assert (failures, threshold) == (3, 3)
+        db.confirm_source_failure_alert("github", 3)
+
+        for _ in range(3):
+            failures, threshold = db.record_source_failure("github", "timeout", thresholds)
+        assert (failures, threshold) == (6, 6)
+        db.confirm_source_failure_alert("github", 6)
+
+        assert db.record_source_success("github", thresholds) == 6
+
+    def test_invalid_thresholds_raise(self, db):
+        with pytest.raises(ValueError):
+            db.record_source_failure("github", "error", [])
