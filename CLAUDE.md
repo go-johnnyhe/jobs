@@ -50,3 +50,13 @@ Both sources delegate to shared `matches_job_criteria()` in `filters.py`:
 - Source health alerts trigger at configured consecutive-failure thresholds in `SOURCE_FAILURE_ALERT_THRESHOLDS`
 - Career source health requires a minimum success rate and count (`CAREERS_MIN_HEALTHY_SUCCESS_RATE`, `CAREERS_MIN_HEALTHY_SUCCESSES`)
 - Recovery alerts are pending until successfully sent; a new failure clears pending recovery (treats one-run success blips as non-recovery)
+
+### Maintenance: Career Source URLs
+
+Company career page URLs break regularly as companies redesign their sites. Common failure modes:
+- **404s**: URL path changed (most common). Fix by finding the new careers page and updating `config.py`.
+- **403s**: Site blocking the scraper. Prefer switching to a direct ATS API (e.g. `boards.greenhouse.io/{board}`) over the company's own careers page.
+- **Greenhouse board ID extraction fails**: If the regex can't find the board ID from the page, add the company to the `known_boards` dict in `career_scraper.py` and point the URL directly at `boards.greenhouse.io/{board}`.
+- **Workday 400 errors**: Some tenants reject large page sizes. The CXS API limit is set to 20 to avoid this.
+
+To diagnose, write a quick script that loops over `COMPANIES` and calls `scraper._scrape_company()` for each, logging OK/FAIL with error details. Last full audit (Feb 2026) fixed 17/95 broken sources.

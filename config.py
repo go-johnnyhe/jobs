@@ -25,8 +25,8 @@ COMPANIES = {
         "ats": "internal",
     },
     "Netflix": {
-        "url": "https://jobs.netflix.com/search?q=software%20engineer",
-        "ats": "lever",
+        "url": "https://www.netflix.com/jobs",
+        "ats": "internal",
     },
     "Microsoft": {
         "url": "https://careers.microsoft.com/us/en/search-results?keywords=software%20engineer%20new%20grad",
@@ -58,7 +58,7 @@ COMPANIES = {
         "ats": "greenhouse",
     },
     "CockroachLabs": {
-        "url": "https://www.cockroachlabs.com/careers/jobs/",
+        "url": "https://boards.greenhouse.io/cockroachlabs",
         "ats": "greenhouse",
     },
     "PlanetScale": {
@@ -112,7 +112,7 @@ COMPANIES = {
         "ats": "workday",
     },
     "F5": {
-        "url": "https://f5.recsolu.com/jobs?per_page=20",
+        "url": "https://www.f5.com/company/careers",
         "ats": "internal",
     },
     # High-Growth Startups
@@ -143,7 +143,7 @@ COMPANIES = {
         "ats": "lever",
     },
     "Robinhood": {
-        "url": "https://robinhood.com/us/en/careers/openings/",
+        "url": "https://boards.greenhouse.io/robinhood",
         "ats": "greenhouse",
     },
     "Coinbase": {
@@ -163,11 +163,11 @@ COMPANIES = {
         "ats": "greenhouse",
     },
     "Chime": {
-        "url": "https://careers.chime.com/c/engineering-jobs",
+        "url": "https://boards.greenhouse.io/chime",
         "ats": "greenhouse",
     },
     "SoFi": {
-        "url": "https://www.sofi.com/careers/job-openings/",
+        "url": "https://boards.greenhouse.io/sofi",
         "ats": "greenhouse",
     },
     # Cloud/Data Infrastructure
@@ -184,7 +184,7 @@ COMPANIES = {
         "ats": "greenhouse",
     },
     "DigitalOcean": {
-        "url": "https://www.digitalocean.com/careers/jobs",
+        "url": "https://boards.greenhouse.io/digitalocean98",
         "ats": "greenhouse",
     },
     "Grafana": {
@@ -234,11 +234,11 @@ COMPANIES = {
         "ats": "greenhouse",
     },
     "DoorDash": {
-        "url": "https://careers.doordash.com/jobs/search?category=Engineering",
-        "ats": "internal",
+        "url": "https://boards.greenhouse.io/doordashusa",
+        "ats": "greenhouse",
     },
     "Instacart": {
-        "url": "https://instacart.careers/job-search/?team=Engineering",
+        "url": "https://boards.greenhouse.io/instacart",
         "ats": "greenhouse",
     },
     "Discord": {
@@ -262,7 +262,7 @@ COMPANIES = {
         "ats": "internal",
     },
     "Twitter": {
-        "url": "https://careers.twitter.com/en/roles.html#702a6c37c14845ae9b51a5e4f5ea4d18",
+        "url": "https://x.com/careers",
         "ats": "internal",
     },
     # Seattle Tech
@@ -292,8 +292,8 @@ COMPANIES = {
         "ats": "greenhouse",
     },
     "Hugging Face": {
-        "url": "https://huggingface.co/jobs",
-        "ats": "greenhouse",
+        "url": "https://huggingface.co/careers",
+        "ats": "internal",
     },
     # Enterprise Software
     "Salesforce": {
@@ -309,8 +309,8 @@ COMPANIES = {
         "ats": "greenhouse",
     },
     "CrowdStrike": {
-        "url": "https://www.crowdstrike.com/careers/job-openings/",
-        "ats": "greenhouse",
+        "url": "https://crowdstrike.wd5.myworkdayjobs.com/CrowdStrikeCareers",
+        "ats": "workday",
     },
     "ServiceNow": {
         "url": "https://careers.servicenow.com/en/jobs/",
@@ -325,7 +325,7 @@ COMPANIES = {
         "ats": "internal",
     },
     "Palo Alto Networks": {
-        "url": "https://jobs.paloaltonetworks.com/en/jobs/",
+        "url": "https://jobs.paloaltonetworks.com/en",
         "ats": "internal",
     },
     # Quant/Trading
@@ -334,8 +334,8 @@ COMPANIES = {
         "ats": "internal",
     },
     "Two Sigma": {
-        "url": "https://www.twosigma.com/careers/open-roles/",
-        "ats": "greenhouse",
+        "url": "https://www.twosigma.com/careers/",
+        "ats": "internal",
     },
     "Citadel": {
         "url": "https://www.citadel.com/careers/open-opportunities/",
@@ -359,7 +359,7 @@ COMPANIES = {
         "ats": "greenhouse",
     },
     "Etsy": {
-        "url": "https://careers.etsy.com/global/en/c/engineering-jobs",
+        "url": "https://careers.etsy.com/en",
         "ats": "internal",
     },
     "Wayfair": {
@@ -376,7 +376,7 @@ COMPANIES = {
         "ats": "greenhouse",
     },
     "Epic Games": {
-        "url": "https://www.epicgames.com/site/en-US/careers/jobs",
+        "url": "https://boards.greenhouse.io/epicgames",
         "ats": "greenhouse",
     },
     "Riot Games": {

@@ -130,8 +130,9 @@ class CareerScraper:
         """Extract Greenhouse board ID from URL or page."""
         # Common patterns
         patterns = [
-            r"boards\.greenhouse\.io/(\w+)",
-            r"greenhouse\.io/embed/job_board\?token=(\w+)",
+            r"boards\.greenhouse\.io/(?!embed\b)([\w-]+)",
+            r"boards\.greenhouse\.io/embed/job_board\?(?:token|for)=([\w-]+)",
+            r"greenhouse\.io/embed/job_board\?(?:token|for)=([\w-]+)",
         ]
 
         for pattern in patterns:
@@ -153,6 +154,14 @@ class CareerScraper:
         known_boards = {
             "airbnb": "airbnb",
             "rubrik": "rubrik",
+            "cockroachlabs": "cockroachlabs",
+            "robinhood": "robinhood",
+            "chime": "chime",
+            "sofi": "sofi",
+            "digitalocean": "digitalocean98",
+            "instacart": "instacart",
+            "epicgames": "epicgames",
+            "doordash": "doordashusa",
         }
 
         for company, board in known_boards.items():
@@ -210,8 +219,8 @@ class CareerScraper:
     def _extract_lever_company(self, url: str) -> Optional[str]:
         """Extract Lever company ID from URL."""
         patterns = [
-            r"jobs\.lever\.co/(\w+)",
-            r"lever\.co/(\w+)",
+            r"jobs\.lever\.co/([\w-]+)",
+            r"lever\.co/([\w-]+)",
         ]
 
         for pattern in patterns:
@@ -295,7 +304,8 @@ class CareerScraper:
         tenant, site, base = tenant_site
         api_url = f"{base}/wday/cxs/{tenant}/{site}/jobs"
 
-        limit = 50
+        # Some Workday CXS tenants reject larger page sizes with HTTP 400.
+        limit = 20
         offset = 0
         total = None
 
