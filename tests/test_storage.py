@@ -1,5 +1,7 @@
 """Tests for storage.py."""
 
+import sqlite3
+
 import pytest
 
 from models import Job
@@ -58,6 +60,29 @@ class TestGetUnnotified:
         assert len(unnotified) == 1
         assert unnotified[0]["url"] == "https://example.com/2"
 
+    def test_orders_oldest_first(self, db):
+        job1 = _make_job(url="https://example.com/1")
+        job2 = _make_job(url="https://example.com/2")
+        db.mark_seen(job1, notified=False)
+        db.mark_seen(job2, notified=False)
+
+        with sqlite3.connect(db.db_path) as conn:
+            conn.execute(
+                "UPDATE seen_jobs SET first_seen = '2026-01-01 00:00:00' WHERE unique_id = ?",
+                (job1.unique_id,),
+            )
+            conn.execute(
+                "UPDATE seen_jobs SET first_seen = '2026-01-02 00:00:00' WHERE unique_id = ?",
+                (job2.unique_id,),
+            )
+            conn.commit()
+
+        unnotified = db.get_unnotified()
+        assert [job["url"] for job in unnotified] == [
+            "https://example.com/1",
+            "https://example.com/2",
+        ]
+
 
 class TestGetRecent:
     def test_limit(self, db):
@@ -78,10 +103,15 @@ class TestGetStats:
         db.mark_seen(_make_job(company="A", url="https://example.com/1"), notified=True)
         db.mark_seen(_make_job(company="A", url="https://example.com/2"), notified=False)
         db.mark_seen(_make_job(company="B", url="https://example.com/3"), notified=True)
+        failures, threshold = db.record_company_failure("Google", "parse failure", [3])
+        assert (failures, threshold) == (1, None)
         stats = db.get_stats()
         assert stats["total_jobs"] == 3
         assert stats["notified_jobs"] == 2
         assert stats["pending_notification"] == 1
+        assert stats["oldest_unnotified_first_seen"] is not None
+        assert isinstance(stats["oldest_unnotified_age_hours"], int)
+        assert stats["failing_priority_companies"][0]["company"] == "Google"
         assert stats["by_company"]["A"] == 2
         assert stats["by_company"]["B"] == 1
 
@@ -156,3 +186,25 @@ class TestSourceHealth:
     def test_invalid_thresholds_raise(self, db):
         with pytest.raises(ValueError):
             db.record_source_failure("github", "error", [])
+
+
+class TestCompanyHealth:
+    def test_failure_threshold_alerts_require_confirmation(self, db):
+        thresholds = [2, 4]
+
+        assert db.record_company_failure("Google", "timeout", thresholds) == (1, None)
+        assert db.record_company_failure("Google", "timeout", thresholds) == (2, 2)
+        assert db.record_company_failure("Google", "timeout", thresholds) == (3, 2)
+        db.confirm_company_failure_alert("Google", 2)
+        assert db.record_company_failure("Google", "timeout", thresholds) == (4, 4)
+
+    def test_recovery_alert_pending_until_confirmed(self, db):
+        for _ in range(3):
+            failures, threshold = db.record_company_failure("Google", "parse failure", [3])
+        assert (failures, threshold) == (3, 3)
+        db.confirm_company_failure_alert("Google", 3)
+
+        assert db.record_company_success("Google", [3]) == 3
+        assert db.record_company_success("Google", [3]) == 3
+        db.confirm_company_recovery_alert("Google")
+        assert db.record_company_success("Google", [3]) == 0

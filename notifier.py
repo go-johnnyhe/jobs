@@ -8,6 +8,8 @@ import requests
 from config import DISCORD_WEBHOOK_URL
 from http_client import create_session
 
+MAX_EMBEDS_PER_MESSAGE = 10
+
 
 class DiscordNotifier:
     """Sends job notifications via Discord webhook."""
@@ -29,16 +31,45 @@ class DiscordNotifier:
             print("No Discord webhook URL configured")
             return False
 
-        # Build the message embeds (Discord allows up to 10 embeds per message)
-        embeds = []
-        for job in jobs[:10]:  # Limit to 10 jobs per message
-            embed = self._build_embed(job)
-            embeds.append(embed)
+        for batch_index, start in enumerate(range(0, len(jobs), MAX_EMBEDS_PER_MESSAGE)):
+            batch = jobs[start:start + MAX_EMBEDS_PER_MESSAGE]
+            sent = self.send_job_batch(
+                batch,
+                total_jobs=len(jobs),
+                batch_index=batch_index,
+                dry_run=dry_run,
+            )
+            if not sent:
+                return False
 
-        payload = {
-            "content": f"**New Job Alert!** Found {len(jobs)} new position(s)",
-            "embeds": embeds,
-        }
+        return True
+
+    def send_job_batch(
+        self,
+        jobs: list,
+        *,
+        total_jobs: Optional[int] = None,
+        batch_index: int = 0,
+        dry_run: bool = False,
+    ) -> bool:
+        """Send a single Discord message containing up to 10 job embeds."""
+        if not jobs:
+            return True
+
+        if len(jobs) > MAX_EMBEDS_PER_MESSAGE:
+            raise ValueError(
+                f"Discord batches are limited to {MAX_EMBEDS_PER_MESSAGE} jobs"
+            )
+
+        if not self.webhook_url:
+            print("No Discord webhook URL configured")
+            return False
+
+        payload = self._build_job_batch_payload(
+            jobs,
+            total_jobs=total_jobs or len(jobs),
+            batch_index=batch_index,
+        )
 
         if dry_run:
             print("Dry run - would send:")
@@ -47,32 +78,13 @@ class DiscordNotifier:
 
         try:
             self._send_payload(payload)
-            print(f"Successfully sent notification for {len(jobs)} jobs")
-
-            # If there are more than 10 jobs, send additional messages
-            if len(jobs) > 10:
-                for i in range(10, len(jobs), 10):
-                    batch = jobs[i:i+10]
-                    self._send_batch(batch)
-
+            print(
+                f"Successfully sent batch {batch_index + 1} "
+                f"with {len(jobs)} job(s)"
+            )
             return True
         except requests.RequestException as e:
-            print(f"Error sending Discord notification: {e}")
-            return False
-
-    def _send_batch(self, jobs: list) -> bool:
-        """Send a batch of jobs as a separate message."""
-        embeds = [self._build_embed(job) for job in jobs]
-
-        payload = {
-            "content": f"(continued) {len(jobs)} more position(s):",
-            "embeds": embeds,
-        }
-
-        try:
-            self._send_payload(payload)
-            return True
-        except requests.RequestException:
+            print(f"Error sending Discord notification batch {batch_index + 1}: {e}")
             return False
 
     def notify_source_failure(
@@ -83,20 +95,82 @@ class DiscordNotifier:
         dry_run: bool = False,
     ) -> bool:
         """Send an alert when a source has repeated failures."""
+        return self._send_health_alert(
+            subject_type="Source",
+            name=source,
+            consecutive_failures=consecutive_failures,
+            error=error,
+            dry_run=dry_run,
+        )
+
+    def notify_source_recovery(
+        self,
+        source: str,
+        recovered_after: int,
+        dry_run: bool = False,
+    ) -> bool:
+        """Send an alert when a previously failing source recovers."""
+        return self._send_recovery_alert(
+            subject_type="Source",
+            name=source,
+            recovered_after=recovered_after,
+            dry_run=dry_run,
+        )
+
+    def notify_company_failure(
+        self,
+        company: str,
+        consecutive_failures: int,
+        error: Optional[str],
+        dry_run: bool = False,
+    ) -> bool:
+        """Send an alert when a priority company scrape repeatedly fails."""
+        return self._send_health_alert(
+            subject_type="Company",
+            name=company,
+            consecutive_failures=consecutive_failures,
+            error=error,
+            dry_run=dry_run,
+        )
+
+    def notify_company_recovery(
+        self,
+        company: str,
+        recovered_after: int,
+        dry_run: bool = False,
+    ) -> bool:
+        """Send an alert when a priority company scrape recovers."""
+        return self._send_recovery_alert(
+            subject_type="Company",
+            name=company,
+            recovered_after=recovered_after,
+            dry_run=dry_run,
+        )
+
+    def _send_health_alert(
+        self,
+        *,
+        subject_type: str,
+        name: str,
+        consecutive_failures: int,
+        error: Optional[str],
+        dry_run: bool,
+    ) -> bool:
+        """Send a repeated-failure alert for a source or company."""
         if not self.webhook_url:
             print("No Discord webhook URL configured")
             return False
 
         payload = {
-            "content": f"[Source alert] `{source}` has repeated failures",
+            "content": f"[{subject_type} alert] `{name}` has repeated failures",
             "embeds": [
                 {
-                    "title": "Job Source Failure",
+                    "title": f"Job {subject_type} Failure",
                     "color": 0xED4245,
                     "fields": [
                         {
-                            "name": "Source",
-                            "value": source,
+                            "name": subject_type,
+                            "value": name,
                             "inline": True,
                         },
                         {
@@ -115,39 +189,44 @@ class DiscordNotifier:
         }
 
         if dry_run:
-            print("Dry run - would send source failure alert:")
+            print(f"Dry run - would send {subject_type.lower()} failure alert:")
             print(json.dumps(payload, indent=2))
             return True
 
         try:
             self._send_payload(payload)
-            print(f"Sent source failure alert for {source} ({consecutive_failures} consecutive)")
+            print(
+                f"Sent {subject_type.lower()} failure alert for {name} "
+                f"({consecutive_failures} consecutive)"
+            )
             return True
         except requests.RequestException as e:
-            print(f"Error sending source failure alert: {e}")
+            print(f"Error sending {subject_type.lower()} failure alert: {e}")
             return False
 
-    def notify_source_recovery(
+    def _send_recovery_alert(
         self,
-        source: str,
+        *,
+        subject_type: str,
+        name: str,
         recovered_after: int,
-        dry_run: bool = False,
+        dry_run: bool,
     ) -> bool:
-        """Send an alert when a previously failing source recovers."""
+        """Send a recovery alert for a source or company."""
         if not self.webhook_url:
             print("No Discord webhook URL configured")
             return False
 
         payload = {
-            "content": f"[Source recovery] `{source}` is healthy again",
+            "content": f"[{subject_type} recovery] `{name}` is healthy again",
             "embeds": [
                 {
-                    "title": "Job Source Recovery",
+                    "title": f"Job {subject_type} Recovery",
                     "color": 0x57F287,
                     "fields": [
                         {
-                            "name": "Source",
-                            "value": source,
+                            "name": subject_type,
+                            "value": name,
                             "inline": True,
                         },
                         {
@@ -161,16 +240,16 @@ class DiscordNotifier:
         }
 
         if dry_run:
-            print("Dry run - would send source recovery alert:")
+            print(f"Dry run - would send {subject_type.lower()} recovery alert:")
             print(json.dumps(payload, indent=2))
             return True
 
         try:
             self._send_payload(payload)
-            print(f"Sent source recovery alert for {source}")
+            print(f"Sent {subject_type.lower()} recovery alert for {name}")
             return True
         except requests.RequestException as e:
-            print(f"Error sending source recovery alert: {e}")
+            print(f"Error sending {subject_type.lower()} recovery alert: {e}")
             return False
 
     def _send_payload(self, payload: dict):
@@ -181,6 +260,28 @@ class DiscordNotifier:
             timeout=30,
         )
         response.raise_for_status()
+
+    def _build_job_batch_payload(
+        self,
+        jobs: list,
+        *,
+        total_jobs: int,
+        batch_index: int,
+    ) -> dict:
+        """Build the payload for a single job-notification batch."""
+        embeds = [self._build_embed(job) for job in jobs]
+        if batch_index == 0:
+            content = f"**New Job Alert!** Sending {len(jobs)} of {total_jobs} position(s)"
+        else:
+            content = (
+                f"(continued) Sending batch {batch_index + 1} "
+                f"with {len(jobs)} more position(s)"
+            )
+
+        return {
+            "content": content,
+            "embeds": embeds,
+        }
 
     def _build_embed(self, job) -> dict:
         """Build a Discord embed for a job listing."""

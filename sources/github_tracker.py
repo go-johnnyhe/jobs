@@ -9,7 +9,7 @@ from bs4 import BeautifulSoup
 from config import GITHUB_REPOS, TARGET_COMPANIES
 from filters import matches_job_criteria
 from http_client import create_session
-from models import Job
+from models import Job, ScrapeResult
 
 
 class GitHubTracker:
@@ -20,6 +20,7 @@ class GitHubTracker:
         self.last_errors: list[str] = []
         self.last_attempted_repos = 0
         self.last_successful_repos = 0
+        self.last_repo_results: dict[str, ScrapeResult] = {}
         self.session.headers.update({
             "Accept": "application/vnd.github.v3.raw",
             "User-Agent": "JobTracker/1.0",
@@ -36,21 +37,24 @@ class GitHubTracker:
         self.last_errors = []
         self.last_attempted_repos = 0
         self.last_successful_repos = 0
+        self.last_repo_results = {}
 
         for repo_config in GITHUB_REPOS:
             self.last_attempted_repos += 1
-            jobs, success, error = self._fetch_from_repo(repo_config)
-            all_jobs.extend(jobs)
-            if success:
+            result = self._fetch_from_repo(repo_config)
+            repo_key = f"{repo_config['owner']}/{repo_config['repo']}"
+            self.last_repo_results[repo_key] = result
+            all_jobs.extend(result.jobs)
+            if result.healthy:
                 self.last_successful_repos += 1
-            elif error:
-                self.last_errors.append(error)
+            elif result.error:
+                self.last_errors.append(result.error)
 
         healthy = self.last_attempted_repos == 0 or self.last_successful_repos > 0
         error_summary = "; ".join(self.last_errors[:3])
         return all_jobs, healthy, error_summary
 
-    def _fetch_from_repo(self, repo_config: dict) -> tuple[list[Job], bool, str]:
+    def _fetch_from_repo(self, repo_config: dict) -> ScrapeResult:
         """Fetch jobs from a single GitHub repository."""
         owner = repo_config["owner"]
         repo = repo_config["repo"]
@@ -63,14 +67,18 @@ class GitHubTracker:
             response.raise_for_status()
             content = response.text
 
-            return self._parse_simplify_readme(content), True, ""
+            return self._parse_simplify_readme(content, repo_name=f"{owner}/{repo}")
         except requests.RequestException as e:
             print(f"Error fetching from {owner}/{repo}: {e}")
-            return [], False, f"{owner}/{repo}: {e}"
+            return ScrapeResult(
+                status="request_failure",
+                error=f"{owner}/{repo}: {e}",
+            )
 
-    def _parse_simplify_readme(self, content: str) -> list[Job]:
+    def _parse_simplify_readme(self, content: str, *, repo_name: str) -> ScrapeResult:
         """Parse the SimplifyJobs README.md format (HTML tables)."""
         jobs = []
+        candidate_count = 0
         soup = BeautifulSoup(content, "html.parser")
 
         # Find all table rows
@@ -79,11 +87,22 @@ class GitHubTracker:
             if len(cells) < 4:
                 continue
 
+            candidate_count += 1
             job = self._parse_html_row(cells)
             if job and self._matches_criteria(job):
                 jobs.append(job)
 
-        return jobs
+        if candidate_count == 0:
+            return ScrapeResult(
+                status="parse_failure",
+                error=f"{repo_name}: no candidate job rows found",
+            )
+
+        return ScrapeResult(
+            jobs=jobs,
+            candidate_count=candidate_count,
+            status="success" if jobs else "empty",
+        )
 
     def _parse_html_row(self, cells) -> Optional[Job]:
         """Parse an HTML table row into a Job object."""

@@ -14,7 +14,7 @@ from config import (
 )
 from filters import matches_job_criteria
 from http_client import create_session
-from models import Job
+from models import Job, ScrapeResult
 
 
 class CareerScraper:
@@ -25,6 +25,7 @@ class CareerScraper:
         self.last_errors: list[str] = []
         self.last_attempted_companies = 0
         self.last_successful_companies = 0
+        self.last_company_results: dict[str, ScrapeResult] = {}
         self._run_request_errors: list[str] = []
         self.session.headers.update({
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
@@ -42,19 +43,24 @@ class CareerScraper:
         self.last_errors = []
         self.last_attempted_companies = 0
         self.last_successful_companies = 0
+        self.last_company_results = {}
         self._run_request_errors = []
 
         for company_name, config in COMPANIES.items():
             self.last_attempted_companies += 1
             print(f"Scraping {company_name}...")
-            jobs, success, error = self._scrape_company(company_name, config)
-            if success:
-                all_jobs.extend(jobs)
+            result = self._scrape_company(company_name, config)
+            self.last_company_results[company_name] = result
+            if result.healthy:
+                all_jobs.extend(result.jobs)
                 self.last_successful_companies += 1
-                print(f"  Found {len(jobs)} matching jobs")
+                print(
+                    f"  Found {len(result.jobs)} matching jobs "
+                    f"from {result.candidate_count} candidate(s)"
+                )
             else:
-                self.last_errors.append(error)
-                print(f"  Error scraping {company_name}: {error}")
+                self.last_errors.append(result.error)
+                print(f"  Error scraping {company_name}: {result.error}")
 
         if self.last_attempted_companies == 0:
             healthy = True
@@ -73,32 +79,26 @@ class CareerScraper:
             )
         return all_jobs, healthy, error_summary
 
-    def _scrape_company(self, company_name: str, config: dict) -> tuple[list[Job], bool, str]:
+    def _scrape_company(self, company_name: str, config: dict) -> ScrapeResult:
         """Scrape a single company's career page."""
         ats = config.get("ats", "internal")
         url = config["url"]
-        start_error_count = len(self._run_request_errors)
 
         try:
             if ats == "greenhouse":
-                jobs = self._scrape_greenhouse(company_name, url)
+                return self._scrape_greenhouse(company_name, url)
             elif ats == "lever":
-                jobs = self._scrape_lever(company_name, url)
+                return self._scrape_lever(company_name, url)
             elif ats == "workday":
-                jobs = self._scrape_workday(company_name, url)
-            else:
-                jobs = self._scrape_generic(company_name, url)
+                return self._scrape_workday(company_name, url)
+            return self._scrape_generic(company_name, url)
         except Exception as e:
-            return [], False, str(e)
+            return ScrapeResult(
+                status="request_failure",
+                error=f"{company_name} ({url}): {e}",
+            )
 
-        company_errors = self._run_request_errors[start_error_count:]
-        if jobs:
-            return jobs, True, ""
-        if company_errors:
-            return [], False, company_errors[-1]
-        return [], True, ""
-
-    def _scrape_greenhouse(self, company_name: str, url: str) -> list[Job]:
+    def _scrape_greenhouse(self, company_name: str, url: str) -> ScrapeResult:
         """Scrape jobs from Greenhouse-powered career pages."""
         jobs = []
 
@@ -112,19 +112,29 @@ class CareerScraper:
                 response = self.session.get(api_url, timeout=30)
                 response.raise_for_status()
                 data = response.json()
+                postings = data.get("jobs", [])
 
-                for job_data in data.get("jobs", []):
+                for job_data in postings:
                     job = self._parse_greenhouse_job(company_name, job_data, board_id)
                     if job and self._matches_criteria(job):
                         jobs.append(job)
+                return self._success_result(jobs, len(postings))
             except requests.RequestException as e:
-                self._record_request_error(company_name, api_url, e)
+                request_error = self._record_request_error(company_name, api_url, e)
                 # Fall back to HTML scraping
-                jobs = self._scrape_generic(company_name, url)
-        else:
-            jobs = self._scrape_generic(company_name, url)
-
-        return jobs
+                fallback_result = self._scrape_generic(company_name, url)
+                if fallback_result.healthy:
+                    return fallback_result
+                return ScrapeResult(
+                    status="request_failure",
+                    error=request_error,
+                )
+            except ValueError as e:
+                return ScrapeResult(
+                    status="parse_failure",
+                    error=f"{company_name} ({api_url}): invalid JSON response ({e})",
+                )
+        return self._scrape_generic(company_name, url)
 
     def _extract_greenhouse_board(self, url: str) -> Optional[str]:
         """Extract Greenhouse board ID from URL or page."""
@@ -189,7 +199,7 @@ class CareerScraper:
             source="career_page",
         )
 
-    def _scrape_lever(self, company_name: str, url: str) -> list[Job]:
+    def _scrape_lever(self, company_name: str, url: str) -> ScrapeResult:
         """Scrape jobs from Lever-powered career pages."""
         jobs = []
 
@@ -208,13 +218,22 @@ class CareerScraper:
                     job = self._parse_lever_job(company_name, job_data)
                     if job and self._matches_criteria(job):
                         jobs.append(job)
+                return self._success_result(jobs, len(data))
             except requests.RequestException as e:
-                self._record_request_error(company_name, api_url, e)
-                jobs = self._scrape_generic(company_name, url)
-        else:
-            jobs = self._scrape_generic(company_name, url)
-
-        return jobs
+                request_error = self._record_request_error(company_name, api_url, e)
+                fallback_result = self._scrape_generic(company_name, url)
+                if fallback_result.healthy:
+                    return fallback_result
+                return ScrapeResult(
+                    status="request_failure",
+                    error=request_error,
+                )
+            except ValueError as e:
+                return ScrapeResult(
+                    status="parse_failure",
+                    error=f"{company_name} ({api_url}): invalid JSON response ({e})",
+                )
+        return self._scrape_generic(company_name, url)
 
     def _extract_lever_company(self, url: str) -> Optional[str]:
         """Extract Lever company ID from URL."""
@@ -258,9 +277,10 @@ class CareerScraper:
             source="career_page",
         )
 
-    def _scrape_generic(self, company_name: str, url: str) -> list[Job]:
+    def _scrape_generic(self, company_name: str, url: str) -> ScrapeResult:
         """Generic HTML scraper for career pages."""
         jobs = []
+        candidate_count = 0
 
         try:
             response = self.session.get(url, timeout=30)
@@ -277,6 +297,7 @@ class CareerScraper:
 
                 # Check if this looks like a job link
                 if self._looks_like_job_link(href, text):
+                    candidate_count += 1
                     job = Job(
                         company=company_name,
                         title=text,
@@ -287,19 +308,31 @@ class CareerScraper:
 
                     if self._matches_criteria(job):
                         jobs.append(job)
+            if candidate_count == 0:
+                return ScrapeResult(
+                    status="parse_failure",
+                    error=f"{company_name} ({url}): no candidate job links found",
+                )
+            return self._success_result(jobs, candidate_count)
         except requests.RequestException as e:
-            self._record_request_error(company_name, url, e)
+            request_error = self._record_request_error(company_name, url, e)
             print(f"  Error fetching {url}: {e}")
+            return ScrapeResult(
+                status="request_failure",
+                error=request_error,
+            )
 
-        return jobs
-
-    def _scrape_workday(self, company_name: str, url: str) -> list[Job]:
+    def _scrape_workday(self, company_name: str, url: str) -> ScrapeResult:
         """Scrape jobs from Workday-powered career pages (CXS API)."""
         jobs = []
+        candidate_count = 0
 
         tenant_site = self._extract_workday_tenant_site(url)
         if not tenant_site:
-            return jobs
+            return ScrapeResult(
+                status="parse_failure",
+                error=f"{company_name} ({url}): unable to extract Workday tenant/site",
+            )
 
         tenant, site, base = tenant_site
         api_url = f"{base}/wday/cxs/{tenant}/{site}/jobs"
@@ -325,14 +358,23 @@ class CareerScraper:
                 response.raise_for_status()
                 data = response.json()
             except requests.RequestException as e:
-                self._record_request_error(company_name, api_url, e)
+                request_error = self._record_request_error(company_name, api_url, e)
                 print(f"  Error fetching Workday API for {company_name}: {e}")
-                break
+                return ScrapeResult(
+                    status="request_failure",
+                    error=request_error,
+                )
+            except ValueError as e:
+                return ScrapeResult(
+                    status="parse_failure",
+                    error=f"{company_name} ({api_url}): invalid JSON response ({e})",
+                )
 
             postings = data.get("jobPostings") or data.get("jobPostingsV2") or []
             if not postings:
                 break
 
+            candidate_count += len(postings)
             for posting in postings:
                 job = self._parse_workday_job(company_name, posting, base)
                 if job and self._matches_criteria(job):
@@ -345,7 +387,7 @@ class CareerScraper:
             if total is not None and offset >= total:
                 break
 
-        return jobs
+        return self._success_result(jobs, candidate_count)
 
     def _extract_workday_tenant_site(self, url: str) -> Optional[tuple[str, str, str]]:
         """Extract Workday tenant and site from a Workday jobs URL."""
@@ -423,9 +465,20 @@ class CareerScraper:
         from urllib.parse import urljoin
         return urljoin(base_url, href)
 
-    def _record_request_error(self, company_name: str, url: str, error: Exception):
+    def _record_request_error(self, company_name: str, url: str, error: Exception) -> str:
         """Record a request failure for source health reporting."""
-        self._run_request_errors.append(f"{company_name} ({url}): {error}")
+        message = f"{company_name} ({url}): {error}"
+        self._run_request_errors.append(message)
+        return message
+
+    def _success_result(self, jobs: list[Job], candidate_count: int) -> ScrapeResult:
+        """Create a healthy scrape result."""
+        status = "success" if jobs else "empty"
+        return ScrapeResult(
+            jobs=jobs,
+            candidate_count=candidate_count,
+            status=status,
+        )
 
     def _matches_criteria(self, job: Job) -> bool:
         """Check if a job matches our filtering criteria."""

@@ -1,8 +1,6 @@
 """Tests for config.py — TARGET_COMPANIES auto-derivation."""
 
-import pytest
-
-from config import COMPANIES, COMPANY_ALIASES, TARGET_COMPANIES
+from config import COMPANIES, COMPANY_ALIASES, PRIORITY_COMPANIES, TARGET_COMPANIES
 
 
 class TestTargetCompaniesDerivation:
@@ -28,6 +26,10 @@ class TestTargetCompaniesDerivation:
 
     def test_sorted(self):
         assert TARGET_COMPANIES == sorted(TARGET_COMPANIES)
+
+    def test_priority_companies_are_configured_companies(self):
+        for company in PRIORITY_COMPANIES:
+            assert company in COMPANIES, f"priority company '{company}' not in COMPANIES"
 
 
 class TestShortNameMatching:

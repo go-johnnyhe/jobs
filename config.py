@@ -484,6 +484,15 @@ TARGET_COMPANIES = sorted(set(
     + [alias for aliases in COMPANY_ALIASES.values() for alias in aliases]
 ))
 
+# Critical companies to surface with company-level health alerts/stats.
+PRIORITY_COMPANIES = [
+    "Google",
+    "Meta",
+    "Microsoft",
+    "Apple",
+    "Amazon",
+]
+
 # Consecutive-failure counts that trigger source health alerts.
 SOURCE_FAILURE_ALERT_THRESHOLDS = [3, 6, 12]
 
