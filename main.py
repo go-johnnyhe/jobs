@@ -7,7 +7,11 @@ import sys
 from sources import GitHubTracker, CareerScraper
 from storage import JobStorage
 from notifier import DiscordNotifier, MAX_EMBEDS_PER_MESSAGE
-from config import PRIORITY_COMPANIES, SOURCE_FAILURE_ALERT_THRESHOLDS
+from config import (
+    COMPANY_FAILURE_ALERT_THRESHOLDS,
+    PRIORITY_COMPANIES,
+    SOURCE_FAILURE_ALERT_THRESHOLDS,
+)
 
 
 def _iter_batches(items: list, batch_size: int):
@@ -75,7 +79,7 @@ def _update_company_health(
         if result.healthy:
             recovered_after = storage.record_company_success(
                 company_name,
-                alert_thresholds=SOURCE_FAILURE_ALERT_THRESHOLDS,
+                alert_thresholds=COMPANY_FAILURE_ALERT_THRESHOLDS,
             )
             if recovered_after and notify and company_name in PRIORITY_COMPANIES:
                 print(f"Company recovered: {company_name} (after {recovered_after} failed runs)")
@@ -90,7 +94,7 @@ def _update_company_health(
             failures, alert_threshold = storage.record_company_failure(
                 company_name,
                 result.error or "unknown company scrape failure",
-                alert_thresholds=SOURCE_FAILURE_ALERT_THRESHOLDS,
+                alert_thresholds=COMPANY_FAILURE_ALERT_THRESHOLDS,
             )
             print(f"Company failure recorded: {company_name} ({failures} consecutive)")
             if (

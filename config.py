@@ -496,6 +496,9 @@ PRIORITY_COMPANIES = [
 # Consecutive-failure counts that trigger source health alerts.
 SOURCE_FAILURE_ALERT_THRESHOLDS = [3, 6, 12]
 
+# Company-level alerts should fire once per failure streak, then recover.
+COMPANY_FAILURE_ALERT_THRESHOLDS = [3]
+
 # Career source is considered healthy only if enough company scrapes succeed.
 CAREERS_MIN_HEALTHY_SUCCESS_RATE = 0.25
 CAREERS_MIN_HEALTHY_SUCCESSES = 5

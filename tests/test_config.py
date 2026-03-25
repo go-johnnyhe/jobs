@@ -1,6 +1,12 @@
 """Tests for config.py — TARGET_COMPANIES auto-derivation."""
 
-from config import COMPANIES, COMPANY_ALIASES, PRIORITY_COMPANIES, TARGET_COMPANIES
+from config import (
+    COMPANIES,
+    COMPANY_ALIASES,
+    COMPANY_FAILURE_ALERT_THRESHOLDS,
+    PRIORITY_COMPANIES,
+    TARGET_COMPANIES,
+)
 
 
 class TestTargetCompaniesDerivation:
@@ -30,6 +36,9 @@ class TestTargetCompaniesDerivation:
     def test_priority_companies_are_configured_companies(self):
         for company in PRIORITY_COMPANIES:
             assert company in COMPANIES, f"priority company '{company}' not in COMPANIES"
+
+    def test_company_alert_thresholds_are_single_shot(self):
+        assert COMPANY_FAILURE_ALERT_THRESHOLDS == [3]
 
 
 class TestShortNameMatching:

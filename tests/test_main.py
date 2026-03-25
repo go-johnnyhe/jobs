@@ -2,6 +2,9 @@
 
 import main
 
+from models import ScrapeResult
+from storage import JobStorage
+
 
 def _make_pending_job(index: int) -> dict:
     return {
@@ -43,6 +46,18 @@ class FakeNotifier:
         return self.batch_results[batch_index]
 
 
+class FakeCompanyNotifier:
+    def __init__(self):
+        self.company_failures = []
+
+    def notify_company_failure(self, company, failures, error, dry_run):
+        self.company_failures.append((company, failures, error, dry_run))
+        return True
+
+    def notify_company_recovery(self, company, recovered_after, dry_run):
+        return True
+
+
 def test_pending_backlog_is_sent_even_without_new_jobs():
     storage = FakeStorage([_make_pending_job(1), _make_pending_job(2)])
     notifier = FakeNotifier([True])
@@ -73,3 +88,25 @@ def test_failed_later_batch_leaves_unsent_jobs_pending():
 
     assert [len(call["ids"]) for call in notifier.calls] == [10, 5]
     assert storage.marked == [job["unique_id"] for job in pending_jobs[:10]]
+
+
+def test_company_alerts_fire_once_per_failure_streak(tmp_path):
+    storage = JobStorage(db_path=str(tmp_path / "test.db"))
+    notifier = FakeCompanyNotifier()
+    result = ScrapeResult(
+        status="parse_failure",
+        error="Meta: no candidate job links found",
+    )
+
+    for _ in range(12):
+        main._update_company_health(
+            storage,
+            notifier,
+            {"Meta": result},
+            notify=True,
+            dry_run=False,
+        )
+
+    assert notifier.company_failures == [
+        ("Meta", 3, "Meta: no candidate job links found", False)
+    ]
