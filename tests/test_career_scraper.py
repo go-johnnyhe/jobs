@@ -2,6 +2,7 @@
 
 import requests
 
+from models import Job
 from models import ScrapeResult
 from sources import career_scraper as cs
 
@@ -114,3 +115,59 @@ def test_generic_candidates_with_zero_matches_is_healthy(monkeypatch):
     assert result.healthy is True
     assert result.status == "empty"
     assert result.candidate_count == 2
+
+
+def test_generic_rejects_career_article_links():
+    scraper = cs.CareerScraper()
+
+    assert scraper._looks_like_job_link(
+        "/en/careers/blog/early-in-career-as-a-software-engineer",
+        "Early-in-Career as a Software Engineer at Palo Alto Networks in India",
+    ) is False
+
+
+def test_career_criteria_requires_entry_level_signal():
+    scraper = cs.CareerScraper()
+    job = Job(
+        company="DoorDash",
+        title="Software Engineer, Data Platform (All Teams)",
+        url="https://boards.greenhouse.io/doordashusa/jobs/1",
+        location="Seattle, WA",
+        source="career_page",
+    )
+
+    assert scraper._matches_criteria(job) is False
+
+
+def test_career_criteria_allows_new_grad_swe():
+    scraper = cs.CareerScraper()
+    job = Job(
+        company="Stripe",
+        title="Software Engineer - New Grad",
+        url="https://stripe.com/jobs/1",
+        location="Seattle, WA",
+        source="career_page",
+    )
+
+    assert scraper._matches_criteria(job) is True
+
+
+def test_career_criteria_rejects_principal_and_systems_roles():
+    scraper = cs.CareerScraper()
+    principal = Job(
+        company="DoorDash",
+        title="Principle Software Engineer - Ads",
+        url="https://boards.greenhouse.io/doordashusa/jobs/1",
+        location="San Francisco, CA",
+        source="career_page",
+    )
+    systems = Job(
+        company="Palo Alto Networks",
+        title="My First Year as an Associate Systems Engineer",
+        url="https://jobs.paloaltonetworks.com/en/blog/my-first-year",
+        location="",
+        source="career_page",
+    )
+
+    assert scraper._matches_criteria(principal) is False
+    assert scraper._matches_criteria(systems) is False

@@ -161,6 +161,10 @@ class TestMatchesJobCriteria:
         job = _make_job(title="Senior Software Engineer", location="Seattle, WA")
         assert matches_job_criteria(job) is False
 
+    def test_principal_misspelling_rejected(self):
+        job = _make_job(title="Principle Software Engineer", location="Seattle, WA")
+        assert matches_job_criteria(job) is False
+
     def test_blocked_location_rejected(self):
         job = _make_job(title="Software Engineer", location="London, UK")
         assert matches_job_criteria(job) is False
@@ -171,6 +175,10 @@ class TestMatchesJobCriteria:
 
     def test_excluded_title_rejected(self):
         job = _make_job(title="Sales Engineer", location="Seattle, WA")
+        assert matches_job_criteria(job) is False
+
+    def test_systems_engineer_rejected(self):
+        job = _make_job(title="Associate Systems Engineer", location="Seattle, WA")
         assert matches_job_criteria(job) is False
 
     def test_new_grad_with_empty_location(self):

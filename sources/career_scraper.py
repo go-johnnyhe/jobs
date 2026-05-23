@@ -7,6 +7,8 @@ import requests
 from bs4 import BeautifulSoup
 
 from config import (
+    CAREER_CONTENT_EXCLUSIONS,
+    CAREER_ENTRY_LEVEL_KEYWORDS,
     COMPANIES,
     ROLE_KEYWORDS,
     CAREERS_MIN_HEALTHY_SUCCESS_RATE,
@@ -442,12 +444,27 @@ class CareerScraper:
         text_lower = text.lower()
 
         # Skip obvious non-job links
-        skip_patterns = ["login", "sign", "about", "contact", "privacy", "terms", "blog"]
+        skip_patterns = [
+            "login",
+            "sign",
+            "about",
+            "contact",
+            "privacy",
+            "terms",
+            "blog",
+            "article",
+            "stories",
+            "news",
+            "events",
+        ]
         if any(p in href_lower or p in text_lower for p in skip_patterns):
             return False
 
+        if self._is_career_content_page(href_lower, text_lower):
+            return False
+
         # Check for job-related patterns in URL
-        job_url_patterns = ["/job", "/position", "/opening", "/career", "/apply"]
+        job_url_patterns = ["/job/", "/jobs/", "/position", "/opening", "/apply"]
         if any(p in href_lower for p in job_url_patterns):
             return True
 
@@ -485,4 +502,15 @@ class CareerScraper:
         title_lower = job.title.lower()
         if not any(kw in title_lower for kw in ROLE_KEYWORDS):
             return False
+        if self._is_career_content_page(job.url.lower(), title_lower):
+            return False
+        if not any(kw in title_lower for kw in CAREER_ENTRY_LEVEL_KEYWORDS):
+            return False
         return matches_job_criteria(job, require_location=True)
+
+    def _is_career_content_page(self, href_lower: str, text_lower: str) -> bool:
+        """Reject career-site articles, stories, and other non-opening content."""
+        return any(
+            pattern in href_lower or pattern in text_lower
+            for pattern in CAREER_CONTENT_EXCLUSIONS
+        )

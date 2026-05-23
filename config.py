@@ -442,6 +442,47 @@ ROLE_KEYWORDS = [
     "fullstack",
 ]
 
+# Career-page results are noisy; require an explicit early-career signal there.
+CAREER_ENTRY_LEVEL_KEYWORDS = [
+    "new grad",
+    "new graduate",
+    "university grad",
+    "university graduate",
+    "graduate software",
+    "software engineer i",
+    "software engineer 1",
+    "sde i",
+    "sde 1",
+    "swe i",
+    "swe 1",
+    "entry level",
+    "entry-level",
+    "early career",
+    "early-career",
+    "junior",
+    "associate software engineer",
+]
+
+# Generic career pages often mix real openings with articles and employee stories.
+CAREER_CONTENT_EXCLUSIONS = [
+    "blog",
+    "culture",
+    "life at",
+    "meet ",
+    "shares ",
+    "why ",
+    "welcome",
+    "hackathon",
+    "intern to full-time",
+    "my first year",
+    "working at",
+    "what it's like",
+    "career journey",
+    "sales onboarding",
+    "systems engineering at",
+    "systems engineer experience",
+]
+
 # Location preferences (empty list = all locations)
 PREFERRED_LOCATIONS = [
     "seattle",
@@ -505,7 +546,7 @@ CAREERS_MIN_HEALTHY_SUCCESSES = 5
 
 # Seniority exclusions - keywords that indicate non-entry-level positions
 SENIORITY_EXCLUSIONS = [
-    "senior", "staff", "principal", "lead", "manager", "director", "sr.", "sr ",
+    "senior", "staff", "principal", "principle", "lead", "manager", "director", "sr.", "sr ",
 ]
 
 # Title exclusions - keywords that indicate non-software engineering roles
@@ -513,6 +554,9 @@ SENIORITY_EXCLUSIONS = [
 TITLE_EXCLUSIONS = [
     # Sales-adjacent roles
     "sales engineer",
+    "systems engineer",
+    "system engineer",
+    "sales team",
     "solutions engineer",
     "solutions architect",
     "customer engineer",
