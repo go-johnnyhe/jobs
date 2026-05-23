@@ -9,6 +9,14 @@ from config import DISCORD_WEBHOOK_URL
 from http_client import create_session
 
 MAX_EMBEDS_PER_MESSAGE = 10
+MAX_CONTENT_CHARS = 2000
+MAX_EMBED_TITLE_CHARS = 220
+MAX_EMBED_URL_CHARS = 2048
+MAX_FIELD_NAME_CHARS = 256
+MAX_JOB_FIELD_VALUE_CHARS = 220
+MAX_SOURCE_FIELD_VALUE_CHARS = 80
+MAX_ERROR_FIELD_VALUE_CHARS = 1024
+MAX_ERROR_BODY_CHARS = 500
 
 
 class DiscordNotifier:
@@ -61,10 +69,6 @@ class DiscordNotifier:
                 f"Discord batches are limited to {MAX_EMBEDS_PER_MESSAGE} jobs"
             )
 
-        if not self.webhook_url:
-            print("No Discord webhook URL configured")
-            return False
-
         payload = self._build_job_batch_payload(
             jobs,
             total_jobs=total_jobs or len(jobs),
@@ -76,6 +80,10 @@ class DiscordNotifier:
             print(json.dumps(payload, indent=2))
             return True
 
+        if not self.webhook_url:
+            print("No Discord webhook URL configured")
+            return False
+
         try:
             self._send_payload(payload)
             print(
@@ -85,6 +93,42 @@ class DiscordNotifier:
             return True
         except requests.RequestException as e:
             print(f"Error sending Discord notification batch {batch_index + 1}: {e}")
+            return False
+
+    def notify_backlog_skipped(
+        self,
+        skipped_count: int,
+        sent_count: int,
+        dry_run: bool = False,
+    ) -> bool:
+        """Send a summary when an old notification backlog is intentionally skipped."""
+        payload = {
+            "content": self._truncate(
+                "Job Tracker recovered from a notification backlog. "
+                f"Skipped {skipped_count} older pending job(s) and will send "
+                f"the newest {sent_count} pending job(s).",
+                MAX_CONTENT_CHARS,
+            )
+        }
+
+        if dry_run:
+            print("Dry run - would send backlog summary:")
+            print(json.dumps(payload, indent=2))
+            return True
+
+        if not self.webhook_url:
+            print("No Discord webhook URL configured")
+            return False
+
+        try:
+            self._send_payload(payload)
+            print(
+                f"Sent backlog summary; skipped {skipped_count} older "
+                f"pending job(s)"
+            )
+            return True
+        except requests.RequestException as e:
+            print(f"Error sending backlog summary: {e}")
             return False
 
     def notify_source_failure(
@@ -180,7 +224,10 @@ class DiscordNotifier:
                         },
                         {
                             "name": "Last error",
-                            "value": (error or "Unknown error")[:1024],
+                            "value": self._truncate(
+                                error or "Unknown error",
+                                MAX_ERROR_FIELD_VALUE_CHARS,
+                            ),
                             "inline": False,
                         },
                     ],
@@ -259,7 +306,16 @@ class DiscordNotifier:
             json=payload,
             timeout=30,
         )
-        response.raise_for_status()
+        try:
+            response.raise_for_status()
+        except requests.HTTPError as exc:
+            body = response.text.strip()
+            if body:
+                raise requests.HTTPError(
+                    f"{exc}; response body: {body[:MAX_ERROR_BODY_CHARS]}",
+                    response=response,
+                ) from exc
+            raise
 
     def _build_job_batch_payload(
         self,
@@ -279,7 +335,7 @@ class DiscordNotifier:
             )
 
         return {
-            "content": content,
+            "content": self._truncate(content, MAX_CONTENT_CHARS),
             "embeds": embeds,
         }
 
@@ -303,24 +359,53 @@ class DiscordNotifier:
         color = self._get_company_color(company)
 
         embed = {
-            "title": f"{company} - {title}",
-            "url": url,
+            "title": self._truncate(
+                f"{company} - {title}",
+                MAX_EMBED_TITLE_CHARS,
+            ),
             "color": color,
             "fields": [
                 {
-                    "name": "Location",
-                    "value": location,
+                    "name": self._truncate("Location", MAX_FIELD_NAME_CHARS),
+                    "value": self._truncate(
+                        location,
+                        MAX_JOB_FIELD_VALUE_CHARS,
+                    ),
                     "inline": True,
                 },
                 {
-                    "name": "Source",
-                    "value": source,
+                    "name": self._truncate("Source", MAX_FIELD_NAME_CHARS),
+                    "value": self._truncate(
+                        source or "Unknown",
+                        MAX_SOURCE_FIELD_VALUE_CHARS,
+                    ),
                     "inline": True,
                 },
             ],
         }
+        safe_url = self._safe_embed_url(url)
+        if safe_url:
+            embed["url"] = safe_url
 
         return embed
+
+    def _safe_embed_url(self, url: str) -> Optional[str]:
+        """Return a Discord-safe embed URL, or None if it should be omitted."""
+        if not url:
+            return None
+        url = str(url).strip()
+        if not url.startswith(("http://", "https://")):
+            return None
+        return self._truncate(url, MAX_EMBED_URL_CHARS)
+
+    def _truncate(self, value, max_chars: int) -> str:
+        """Truncate text to Discord field limits with an ASCII suffix."""
+        text = str(value or "")
+        if len(text) <= max_chars:
+            return text
+        if max_chars <= 3:
+            return text[:max_chars]
+        return text[:max_chars - 3] + "..."
 
     def _get_company_color(self, company: str) -> int:
         """Get a color code for a company."""

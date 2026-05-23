@@ -13,6 +13,8 @@ from config import (
     SOURCE_FAILURE_ALERT_THRESHOLDS,
 )
 
+MAX_PENDING_JOBS_TO_NOTIFY = 20
+
 
 def _iter_batches(items: list, batch_size: int):
     """Yield fixed-size batches from a list."""
@@ -120,25 +122,44 @@ def _send_pending_notifications(storage: JobStorage, notifier: DiscordNotifier, 
     pending_jobs = storage.get_unnotified()
     if not pending_jobs:
         print("No new or pending jobs to notify about")
-        return
+        return True
 
-    print(f"Sending Discord notifications for {len(pending_jobs)} pending job(s)...")
+    skipped_jobs = []
+    jobs_to_send = pending_jobs
+    if len(pending_jobs) > MAX_PENDING_JOBS_TO_NOTIFY:
+        skipped_jobs = pending_jobs[:-MAX_PENDING_JOBS_TO_NOTIFY]
+        jobs_to_send = pending_jobs[-MAX_PENDING_JOBS_TO_NOTIFY:]
+        print(
+            f"Pending backlog has {len(pending_jobs)} job(s); "
+            f"skipping {len(skipped_jobs)} older job(s) and sending the newest "
+            f"{len(jobs_to_send)}"
+        )
+        summary_sent = notifier.notify_backlog_skipped(
+            len(skipped_jobs),
+            len(jobs_to_send),
+            dry_run=dry_run,
+        )
+        if not summary_sent:
+            print("Stopped before sending job batches; backlog summary failed")
+            return False
+
+    print(f"Sending Discord notifications for {len(jobs_to_send)} pending job(s)...")
     sent_jobs = 0
 
-    for batch_index, batch in enumerate(_iter_batches(pending_jobs, MAX_EMBEDS_PER_MESSAGE)):
+    for batch_index, batch in enumerate(_iter_batches(jobs_to_send, MAX_EMBEDS_PER_MESSAGE)):
         sent = notifier.send_job_batch(
             batch,
-            total_jobs=len(pending_jobs),
+            total_jobs=len(jobs_to_send),
             batch_index=batch_index,
             dry_run=dry_run,
         )
         if not sent:
-            remaining = len(pending_jobs) - sent_jobs
+            remaining = len(jobs_to_send) - sent_jobs
             print(
                 f"Stopped after failed batch {batch_index + 1}; "
                 f"{remaining} job(s) remain pending"
             )
-            return
+            return False
 
         if not dry_run:
             for job in batch:
@@ -148,7 +169,12 @@ def _send_pending_notifications(storage: JobStorage, notifier: DiscordNotifier, 
     if dry_run:
         print("Dry run complete; pending jobs were not marked as notified")
     else:
+        for job in skipped_jobs:
+            storage.mark_notified(job)
         print(f"Marked {sent_jobs} job(s) as notified")
+        if skipped_jobs:
+            print(f"Marked {len(skipped_jobs)} skipped older job(s) as handled")
+    return True
 
 
 def main():
@@ -309,11 +335,13 @@ def main():
 
     # Send notifications if requested
     if args.notify:
-        _send_pending_notifications(
+        notifications_sent = _send_pending_notifications(
             storage,
             notifier,
             dry_run=args.dry_run,
         )
+        if not notifications_sent:
+            sys.exit(1)
 
 
 if __name__ == "__main__":
