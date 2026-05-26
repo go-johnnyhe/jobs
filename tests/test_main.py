@@ -192,6 +192,27 @@ def test_company_alerts_fire_once_per_failure_streak(tmp_path):
             dry_run=False,
         )
 
+    assert notifier.company_failures == []
+
+
+def test_company_alerts_can_be_enabled(monkeypatch, tmp_path):
+    storage = JobStorage(db_path=str(tmp_path / "test.db"))
+    notifier = FakeCompanyNotifier()
+    result = ScrapeResult(
+        status="parse_failure",
+        error="Meta: no candidate job links found",
+    )
+    monkeypatch.setattr(main, "ENABLE_COMPANY_HEALTH_ALERTS", True)
+
+    for _ in range(12):
+        main._update_company_health(
+            storage,
+            notifier,
+            {"Meta": result},
+            notify=True,
+            dry_run=False,
+        )
+
     assert notifier.company_failures == [
         ("Meta", 3, "Meta: no candidate job links found", False)
     ]

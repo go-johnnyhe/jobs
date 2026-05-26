@@ -540,6 +540,10 @@ SOURCE_FAILURE_ALERT_THRESHOLDS = [3, 6, 12]
 # Company-level alerts should fire once per failure streak, then recover.
 COMPANY_FAILURE_ALERT_THRESHOLDS = [3]
 
+# Company scrape failures are noisy and often mean a career page changed, not
+# that the job tracker itself is broken. Keep these in stats/logs by default.
+ENABLE_COMPANY_HEALTH_ALERTS = False
+
 # Career source is considered healthy only if enough company scrapes succeed.
 CAREERS_MIN_HEALTHY_SUCCESS_RATE = 0.25
 CAREERS_MIN_HEALTHY_SUCCESSES = 5
