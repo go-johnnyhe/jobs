@@ -18,7 +18,13 @@ COMPANIES = {
     },
     "Amazon": {
         "url": "https://www.amazon.jobs/en/search?base_query=software+engineer+new+grad",
-        "ats": "internal",
+        "ats": "amazon",
+        "search_queries": [
+            "Software Development Engineer 2026",
+            "Software Development Engineer 2027",
+            "Software Development Engineer I",
+            "Software Engineer 1",
+        ],
     },
     "Apple": {
         "url": "https://jobs.apple.com/en-us/search?sort=newest&search=software%20engineer%20new%20grad",
@@ -39,39 +45,46 @@ COMPANIES = {
     "Block": {
         "url": "https://block.xyz/careers?teams=Engineering",
         "ats": "greenhouse",
+        "ats_id": "block",
     },
     # Cloud & Infrastructure
     "Cloudflare": {
         "url": "https://www.cloudflare.com/careers/jobs/?department=Engineering",
         "ats": "greenhouse",
+        "ats_id": "cloudflare",
     },
     "HashiCorp": {
         "url": "https://www.hashicorp.com/careers/open-positions?department=Engineering",
-        "ats": "greenhouse",
+        "ats": "internal",
     },
     "Datadog": {
         "url": "https://careers.datadoghq.com/all-jobs/?team=Engineering",
         "ats": "greenhouse",
+        "ats_id": "datadog",
     },
     "Confluent": {
         "url": "https://careers.confluent.io/search/engineering/jobs",
-        "ats": "greenhouse",
+        "ats": "internal",
     },
     "CockroachLabs": {
         "url": "https://boards.greenhouse.io/cockroachlabs",
         "ats": "greenhouse",
+        "ats_id": "cockroachlabs",
     },
     "PlanetScale": {
         "url": "https://planetscale.com/careers#positions",
-        "ats": "lever",
+        "ats": "greenhouse",
+        "ats_id": "planetscale",
     },
     "Temporal": {
         "url": "https://temporal.io/careers#open-positions",
         "ats": "greenhouse",
+        "ats_id": "temporaltechnologies",
     },
     "Snowflake": {
         "url": "https://careers.snowflake.com/us/en/search-results?keywords=software%20engineer",
-        "ats": "internal",
+        "ats": "ashby",
+        "ats_id": "snowflake",
     },
     # Developer Tools
     "GitHub": {
@@ -81,26 +94,32 @@ COMPANIES = {
     "GitLab": {
         "url": "https://about.gitlab.com/jobs/all-jobs/?department=Engineering",
         "ats": "greenhouse",
+        "ats_id": "gitlab",
     },
     "Vercel": {
         "url": "https://vercel.com/careers#open-positions",
         "ats": "greenhouse",
+        "ats_id": "vercel",
     },
     "Netlify": {
         "url": "https://www.netlify.com/careers/#perfect-job",
         "ats": "greenhouse",
+        "ats_id": "netlify",
     },
     "Supabase": {
         "url": "https://supabase.com/careers#positions",
-        "ats": "lever",
+        "ats": "ashby",
+        "ats_id": "supabase",
     },
     "Linear": {
         "url": "https://linear.app/careers#open-roles",
-        "ats": "lever",
+        "ats": "ashby",
+        "ats_id": "Linear",
     },
     "Replit": {
         "url": "https://replit.com/site/careers",
-        "ats": "greenhouse",
+        "ats": "ashby",
+        "ats_id": "replit",
     },
     # Seattle Companies
     "Expedia": {
@@ -112,8 +131,8 @@ COMPANIES = {
         "ats": "workday",
     },
     "F5": {
-        "url": "https://www.f5.com/company/careers",
-        "ats": "internal",
+        "url": "https://ffive.wd5.myworkdayjobs.com/f5jobs",
+        "ats": "workday",
     },
     # High-Growth Startups
     "Flyio": {
@@ -122,87 +141,104 @@ COMPANIES = {
     },
     "Railway": {
         "url": "https://railway.app/careers",
-        "ats": "lever",
+        "ats": "internal",
     },
     "Render": {
         "url": "https://render.com/careers#open-positions",
-        "ats": "greenhouse",
+        "ats": "ashby",
+        "ats_id": "render",
     },
     # Existing
     "Airbnb": {
         "url": "https://careers.airbnb.com/positions/?department=engineering",
         "ats": "greenhouse",
+        "ats_id": "airbnb",
     },
     "Rubrik": {
         "url": "https://www.rubrik.com/company/careers/departments/job-openings",
         "ats": "greenhouse",
+        "ats_id": "rubrik",
     },
     # Fintech
     "Plaid": {
         "url": "https://plaid.com/careers/openings/",
-        "ats": "lever",
+        "ats": "internal",
     },
     "Robinhood": {
         "url": "https://boards.greenhouse.io/robinhood",
         "ats": "greenhouse",
+        "ats_id": "robinhood",
     },
     "Coinbase": {
         "url": "https://www.coinbase.com/careers/positions",
         "ats": "greenhouse",
+        "ats_id": "coinbase",
     },
     "Affirm": {
         "url": "https://boards.greenhouse.io/affirm",
         "ats": "greenhouse",
+        "ats_id": "affirm",
     },
     "Brex": {
         "url": "https://www.brex.com/careers#joblist",
         "ats": "greenhouse",
+        "ats_id": "brex",
     },
     "Ramp": {
         "url": "https://ramp.com/careers#openings",
-        "ats": "greenhouse",
+        "ats": "ashby",
+        "ats_id": "ramp",
     },
     "Chime": {
         "url": "https://boards.greenhouse.io/chime",
         "ats": "greenhouse",
+        "ats_id": "chime",
     },
     "SoFi": {
         "url": "https://boards.greenhouse.io/sofi",
         "ats": "greenhouse",
+        "ats_id": "sofi",
     },
     # Cloud/Data Infrastructure
     "Databricks": {
         "url": "https://www.databricks.com/company/careers/open-positions",
         "ats": "greenhouse",
+        "ats_id": "databricks",
     },
     "MongoDB": {
         "url": "https://www.mongodb.com/careers/jobs",
         "ats": "greenhouse",
+        "ats_id": "mongodb",
     },
     "Elastic": {
         "url": "https://jobs.elastic.co/jobs/department/engineering",
         "ats": "greenhouse",
+        "ats_id": "elastic",
     },
     "DigitalOcean": {
         "url": "https://boards.greenhouse.io/digitalocean98",
         "ats": "greenhouse",
+        "ats_id": "digitalocean98",
     },
     "Grafana": {
         "url": "https://grafana.com/about/careers/open-positions/",
-        "ats": "lever",
+        "ats": "internal",
     },
     # Dev Tools & Productivity
     "Figma": {
         "url": "https://www.figma.com/careers/#job-openings",
         "ats": "greenhouse",
+        "ats_id": "figma",
     },
     "Notion": {
         "url": "https://www.notion.so/careers#702a6c37c14845ae9b51a5e4f5ea4d18",
-        "ats": "lever",
+        "ats": "ashby",
+        "ats_id": "notion",
     },
     "Postman": {
         "url": "https://www.postman.com/company/careers/open-positions/",
         "ats": "greenhouse",
+        "ats_id": "postman",
     },
     "Atlassian": {
         "url": "https://www.atlassian.com/company/careers/all-jobs",
@@ -211,18 +247,20 @@ COMPANIES = {
     "Twilio": {
         "url": "https://www.twilio.com/en-us/company/jobs",
         "ats": "greenhouse",
+        "ats_id": "twilio",
     },
     "Miro": {
         "url": "https://miro.com/careers/open-positions/",
-        "ats": "greenhouse",
+        "ats": "internal",
     },
     "Retool": {
         "url": "https://retool.com/careers#jobs",
-        "ats": "lever",
+        "ats": "internal",
     },
     "Airtable": {
         "url": "https://airtable.com/careers#openings",
         "ats": "greenhouse",
+        "ats_id": "airtable",
     },
     # Consumer Tech
     "Uber": {
@@ -232,18 +270,22 @@ COMPANIES = {
     "Lyft": {
         "url": "https://www.lyft.com/careers#openings",
         "ats": "greenhouse",
+        "ats_id": "lyft",
     },
     "DoorDash": {
         "url": "https://boards.greenhouse.io/doordashusa",
         "ats": "greenhouse",
+        "ats_id": "doordashusa",
     },
     "Instacart": {
         "url": "https://boards.greenhouse.io/instacart",
         "ats": "greenhouse",
+        "ats_id": "instacart",
     },
     "Discord": {
         "url": "https://discord.com/jobs?team=engineering",
         "ats": "greenhouse",
+        "ats_id": "discord",
     },
     "Spotify": {
         "url": "https://www.lifeatspotify.com/jobs?c=engineering",
@@ -252,10 +294,12 @@ COMPANIES = {
     "Reddit": {
         "url": "https://www.redditinc.com/careers?team=engineering",
         "ats": "greenhouse",
+        "ats_id": "reddit",
     },
     "Pinterest": {
         "url": "https://www.pinterestcareers.com/en/jobs/?team=Engineering",
         "ats": "greenhouse",
+        "ats_id": "pinterest",
     },
     "Snap": {
         "url": "https://snap.com/en-US/jobs?teams=Engineering",
@@ -268,7 +312,7 @@ COMPANIES = {
     # Seattle Tech
     "Redfin": {
         "url": "https://www.redfin.com/about/jobs",
-        "ats": "greenhouse",
+        "ats": "internal",
     },
     "Qualtrics": {
         "url": "https://www.qualtrics.com/careers/us/en/search-results",
@@ -278,18 +322,20 @@ COMPANIES = {
     "Anthropic": {
         "url": "https://www.anthropic.com/careers#open-roles",
         "ats": "greenhouse",
+        "ats_id": "anthropic",
     },
     "OpenAI": {
         "url": "https://openai.com/careers/search",
-        "ats": "greenhouse",
+        "ats": "internal",
     },
     "ScaleAI": {
         "url": "https://scale.com/careers",
-        "ats": "lever",
+        "ats": "internal",
     },
     "Cohere": {
         "url": "https://cohere.com/careers#open-roles",
-        "ats": "greenhouse",
+        "ats": "ashby",
+        "ats_id": "cohere",
     },
     "Hugging Face": {
         "url": "https://huggingface.co/careers",
@@ -301,12 +347,13 @@ COMPANIES = {
         "ats": "internal",
     },
     "Adobe": {
-        "url": "https://careers.adobe.com/us/en/search-results?keywords=software%20engineer",
-        "ats": "internal",
+        "url": "https://adobe.wd5.myworkdayjobs.com/external_experienced",
+        "ats": "workday",
     },
     "Okta": {
         "url": "https://www.okta.com/company/careers/#job-openings",
         "ats": "greenhouse",
+        "ats_id": "okta",
     },
     "CrowdStrike": {
         "url": "https://crowdstrike.wd5.myworkdayjobs.com/CrowdStrikeCareers",
@@ -314,19 +361,21 @@ COMPANIES = {
     },
     "ServiceNow": {
         "url": "https://careers.servicenow.com/en/jobs/",
-        "ats": "internal",
+        "ats": "smartrecruiters",
+        "ats_id": "ServiceNow",
     },
     "Palantir": {
         "url": "https://www.palantir.com/careers/",
         "ats": "lever",
+        "ats_id": "palantir",
     },
     "Splunk": {
         "url": "https://www.splunk.com/en_us/careers.html",
         "ats": "internal",
     },
     "Palo Alto Networks": {
-        "url": "https://jobs.paloaltonetworks.com/en",
-        "ats": "internal",
+        "url": "https://paloaltonetworks.wd5.myworkdayjobs.com/panwexternalcareers",
+        "ats": "workday",
     },
     # Quant/Trading
     "Jane Street": {
@@ -343,7 +392,7 @@ COMPANIES = {
     },
     "HRT": {
         "url": "https://www.hudsonrivertrading.com/careers/",
-        "ats": "greenhouse",
+        "ats": "internal",
     },
     "DE Shaw": {
         "url": "https://www.deshaw.com/careers",
@@ -351,12 +400,12 @@ COMPANIES = {
     },
     "Optiver": {
         "url": "https://optiver.com/working-at-optiver/career-opportunities/",
-        "ats": "greenhouse",
+        "ats": "internal",
     },
     # E-commerce/Retail Tech
     "Shopify": {
         "url": "https://www.shopify.com/careers/search?teams%5B%5D=engineering",
-        "ats": "greenhouse",
+        "ats": "internal",
     },
     "Etsy": {
         "url": "https://careers.etsy.com/en",
@@ -364,7 +413,7 @@ COMPANIES = {
     },
     "Wayfair": {
         "url": "https://www.wayfair.com/careers/jobs?teamIds=6&gh_jid=",
-        "ats": "greenhouse",
+        "ats": "internal",
     },
     "Chewy": {
         "url": "https://careers.chewy.com/us/en/search-results?keywords=software",
@@ -374,35 +423,41 @@ COMPANIES = {
     "Roblox": {
         "url": "https://careers.roblox.com/jobs?teams=Engineering",
         "ats": "greenhouse",
+        "ats_id": "roblox",
     },
     "Epic Games": {
         "url": "https://boards.greenhouse.io/epicgames",
         "ats": "greenhouse",
+        "ats_id": "epicgames",
     },
     "Riot Games": {
         "url": "https://www.riotgames.com/en/work-with-us/jobs#702a6c37c14845ae9b51a5e4f5ea4d18",
         "ats": "greenhouse",
+        "ats_id": "riotgames",
     },
     # Misc High-Growth
     "Gusto": {
         "url": "https://gusto.com/about/careers#702a6c37c14845ae9b51a5e4f5ea4d18",
         "ats": "greenhouse",
+        "ats_id": "gusto",
     },
     "Rippling": {
         "url": "https://www.rippling.com/careers/all-openings",
-        "ats": "greenhouse",
+        "ats": "internal",
     },
     "Navan": {
         "url": "https://navan.com/careers#702a6c37c14845ae9b51a5e4f5ea4d18",
         "ats": "greenhouse",
+        "ats_id": "tripactions",
     },
     "Zapier": {
         "url": "https://zapier.com/jobs",
-        "ats": "lever",
+        "ats": "internal",
     },
     "Asana": {
         "url": "https://asana.com/jobs/all",
         "ats": "greenhouse",
+        "ats_id": "asana",
     },
 }
 
@@ -461,6 +516,8 @@ CAREER_ENTRY_LEVEL_KEYWORDS = [
     "early-career",
     "junior",
     "associate software engineer",
+    "2026",
+    "2027",
 ]
 
 # Generic career pages often mix real openings with articles and employee stories.
@@ -548,6 +605,10 @@ ENABLE_COMPANY_HEALTH_ALERTS = False
 CAREERS_MIN_HEALTHY_SUCCESS_RATE = 0.25
 CAREERS_MIN_HEALTHY_SUCCESSES = 5
 
+# Career pages are independent; bounded concurrency keeps one slow or blocked
+# company from delaying the entire hourly run.
+CAREERS_MAX_WORKERS = 8
+
 # Seniority exclusions - keywords that indicate non-entry-level positions
 SENIORITY_EXCLUSIONS = [
     "senior", "staff", "principal", "principle", "lead", "manager", "director", "sr.", "sr ",
@@ -556,6 +617,8 @@ SENIORITY_EXCLUSIONS = [
 # Title exclusions - keywords that indicate non-software engineering roles
 # Note: Data/ML/AI Engineer and DevOps/SRE/Platform Engineer are intentionally allowed
 TITLE_EXCLUSIONS = [
+    # Internships are tracked separately from full-time new-grad roles.
+    "intern",
     # Sales-adjacent roles
     "sales engineer",
     "systems engineer",

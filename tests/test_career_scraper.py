@@ -77,7 +77,11 @@ def test_generic_zero_candidates_is_parse_failure(monkeypatch):
         def raise_for_status(self):
             return None
 
-    monkeypatch.setattr(scraper.session, "get", lambda *_args, **_kwargs: Response())
+    monkeypatch.setattr(
+        scraper.generic_session,
+        "get",
+        lambda *_args, **_kwargs: Response(),
+    )
 
     result = scraper._scrape_company(
         "Google",
@@ -88,7 +92,7 @@ def test_generic_zero_candidates_is_parse_failure(monkeypatch):
     assert result.candidate_count == 0
 
 
-def test_generic_candidates_with_zero_matches_is_healthy(monkeypatch):
+def test_generic_candidates_with_zero_matches_is_degraded(monkeypatch):
     scraper = cs.CareerScraper()
 
     html = """
@@ -104,7 +108,11 @@ def test_generic_candidates_with_zero_matches_is_healthy(monkeypatch):
         def raise_for_status(self):
             return None
 
-    monkeypatch.setattr(scraper.session, "get", lambda *_args, **_kwargs: Response())
+    monkeypatch.setattr(
+        scraper.generic_session,
+        "get",
+        lambda *_args, **_kwargs: Response(),
+    )
     monkeypatch.setattr(scraper, "_matches_criteria", lambda _job: False)
 
     result = scraper._scrape_company(
@@ -112,9 +120,141 @@ def test_generic_candidates_with_zero_matches_is_healthy(monkeypatch):
         {"ats": "internal", "url": "https://example.com/jobs"},
     )
 
-    assert result.healthy is True
-    assert result.status == "empty"
+    assert result.healthy is False
+    assert result.status == "degraded_empty"
     assert result.candidate_count == 2
+
+
+def test_explicit_greenhouse_id_skips_page_discovery(monkeypatch):
+    scraper = cs.CareerScraper()
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"jobs": []}
+
+    monkeypatch.setattr(scraper.session, "get", lambda *_args, **_kwargs: Response())
+    monkeypatch.setattr(
+        scraper,
+        "_extract_greenhouse_board",
+        lambda _url: (_ for _ in ()).throw(AssertionError("should not discover")),
+    )
+
+    result = scraper._scrape_company(
+        "Acme",
+        {
+            "ats": "greenhouse",
+            "ats_id": "acme",
+            "url": "https://acme.example/careers",
+        },
+    )
+    assert result.healthy is True
+
+
+def test_ashby_parser_and_filter(monkeypatch):
+    scraper = cs.CareerScraper()
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "jobs": [
+                    {
+                        "title": "Software Engineer, New Grad",
+                        "jobUrl": "https://jobs.ashbyhq.com/acme/1",
+                        "location": "Seattle, WA",
+                        "publishedAt": "2026-07-01T00:00:00Z",
+                    }
+                ]
+            }
+
+    monkeypatch.setattr(scraper.session, "get", lambda *_args, **_kwargs: Response())
+    result = scraper._scrape_company(
+        "Acme",
+        {
+            "ats": "ashby",
+            "ats_id": "acme",
+            "url": "https://acme.example/careers",
+        },
+    )
+    assert result.healthy is True
+    assert result.candidate_count == 1
+    assert result.jobs[0].location == "Seattle, WA"
+    assert result.jobs[0].date_posted == "2026-07-01T00:00:00Z"
+
+
+def test_amazon_public_search_adapter(monkeypatch):
+    scraper = cs.CareerScraper()
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "jobs": [
+                    {
+                        "id": "1",
+                        "title": "Software Development Engineer - 2026",
+                        "job_path": "/en/jobs/1/software-development-engineer-2026",
+                        "normalized_location": "Seattle, Washington, USA",
+                        "posted_date": "July 1, 2026",
+                    }
+                ]
+            }
+
+    monkeypatch.setattr(scraper.session, "get", lambda *_args, **_kwargs: Response())
+    result = scraper._scrape_company(
+        "Amazon",
+        {
+            "ats": "amazon",
+            "url": "https://www.amazon.jobs/en/search",
+            "search_queries": ["Software Development Engineer 2026"],
+        },
+    )
+    assert result.healthy is True
+    assert result.candidate_count == 1
+    assert result.jobs[0].url.startswith("https://www.amazon.jobs/en/jobs/1/")
+
+
+def test_smartrecruiters_adapter_paginates_and_parses(monkeypatch):
+    scraper = cs.CareerScraper()
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "totalFound": 1,
+                "content": [
+                    {
+                        "id": "1",
+                        "name": "Associate Software Engineer",
+                        "location": {
+                            "fullLocation": "San Francisco, California, United States"
+                        },
+                        "releasedDate": "2026-07-01T00:00:00Z",
+                    }
+                ],
+            }
+
+    monkeypatch.setattr(scraper.session, "get", lambda *_args, **_kwargs: Response())
+    result = scraper._scrape_company(
+        "ServiceNow",
+        {
+            "ats": "smartrecruiters",
+            "ats_id": "ServiceNow",
+            "url": "https://careers.servicenow.com/jobs",
+        },
+    )
+    assert result.healthy is True
+    assert result.candidate_count == 1
+    assert result.jobs[0].url == "https://jobs.smartrecruiters.com/ServiceNow/1"
 
 
 def test_generic_rejects_career_article_links():
@@ -150,6 +290,19 @@ def test_career_criteria_allows_new_grad_swe():
     )
 
     assert scraper._matches_criteria(job) is True
+
+
+def test_career_criteria_rejects_intern_substring():
+    scraper = cs.CareerScraper()
+    job = Job(
+        company="Notion",
+        title="Software Engineer Intern (Fall 2026)",
+        url="https://jobs.ashbyhq.com/notion/1",
+        location="San Francisco, CA",
+        source="career_page",
+    )
+
+    assert scraper._matches_criteria(job) is False
 
 
 def test_career_criteria_rejects_principal_and_systems_roles():

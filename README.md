@@ -29,6 +29,7 @@ python main.py                   # Check for jobs
 python main.py --notify              # Check and send Discord alerts
 python main.py --notify --dry-run    # Print Discord payload without sending
 python main.py --stats               # View statistics
+python main.py --audit-sources       # Live-check every career source (no DB/Discord changes)
 ```
 
 ## Development
@@ -37,3 +38,10 @@ python main.py --stats               # View statistics
 pip install -r requirements-dev.txt  # Install dev dependencies (adds pytest)
 python -m pytest tests/ -v           # Run all tests
 ```
+
+## Source reliability
+
+Structured Greenhouse, Lever, Ashby, Workday, SmartRecruiters, and Amazon
+adapters are preferred. Generic HTML sources are still checked as a fallback,
+but are reported as `DEGRADED` because JavaScript rendering and pagination can
+make their coverage incomplete.

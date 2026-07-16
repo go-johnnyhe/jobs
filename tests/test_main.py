@@ -106,9 +106,12 @@ def test_failed_later_batch_leaves_unsent_jobs_pending():
 
 
 def test_large_backlog_sends_summary_and_newest_jobs_only():
-    pending_jobs = [_make_pending_job(index) for index in range(25)]
+    backlog_size = main.MAX_PENDING_JOBS_TO_NOTIFY + 5
+    pending_jobs = [_make_pending_job(index) for index in range(backlog_size)]
     storage = FakeStorage(pending_jobs)
-    notifier = FakeNotifier([True, True])
+    notifier = FakeNotifier(
+        [True] * ((main.MAX_PENDING_JOBS_TO_NOTIFY + 9) // 10)
+    )
 
     success = main._send_pending_notifications(storage, notifier, dry_run=False)
 
@@ -120,18 +123,17 @@ def test_large_backlog_sends_summary_and_newest_jobs_only():
             "dry_run": False,
         }
     ]
-    assert [call["ids"] for call in notifier.calls] == [
-        [f"job-{index}" for index in range(5, 15)],
-        [f"job-{index}" for index in range(15, 25)],
-    ]
+    sent_ids = [job_id for call in notifier.calls for job_id in call["ids"]]
+    assert sent_ids == [f"job-{index}" for index in range(5, backlog_size)]
     assert storage.marked == [
-        *[f"job-{index}" for index in range(5, 25)],
+        *[f"job-{index}" for index in range(5, backlog_size)],
         *[f"job-{index}" for index in range(5)],
     ]
 
 
 def test_large_backlog_keeps_pending_if_summary_fails():
-    pending_jobs = [_make_pending_job(index) for index in range(25)]
+    backlog_size = main.MAX_PENDING_JOBS_TO_NOTIFY + 5
+    pending_jobs = [_make_pending_job(index) for index in range(backlog_size)]
     storage = FakeStorage(pending_jobs)
     notifier = FakeNotifier([True, True], summary_result=False)
 
@@ -150,7 +152,8 @@ def test_large_backlog_keeps_pending_if_summary_fails():
 
 
 def test_large_backlog_keeps_skipped_pending_if_job_batch_fails():
-    pending_jobs = [_make_pending_job(index) for index in range(25)]
+    backlog_size = main.MAX_PENDING_JOBS_TO_NOTIFY + 5
+    pending_jobs = [_make_pending_job(index) for index in range(backlog_size)]
     storage = FakeStorage(pending_jobs)
     notifier = FakeNotifier([True, False])
 

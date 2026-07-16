@@ -72,3 +72,10 @@ class TestShortNameMatching:
         assert matches("CockroachLabs") is True
         # "epic games" should match "Epic Games"
         assert matches("Epic Games") is True
+
+
+def test_structured_ats_configs_have_required_identifiers():
+    needs_id = {"ashby", "smartrecruiters"}
+    for company, config in COMPANIES.items():
+        if config.get("ats") in needs_id:
+            assert config.get("ats_id"), f"{company} needs an explicit ATS identifier"

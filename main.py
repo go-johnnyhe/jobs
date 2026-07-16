@@ -14,7 +14,7 @@ from config import (
     SOURCE_FAILURE_ALERT_THRESHOLDS,
 )
 
-MAX_PENDING_JOBS_TO_NOTIFY = 20
+MAX_PENDING_JOBS_TO_NOTIFY = 50
 
 
 def _iter_batches(items: list, batch_size: int):
@@ -224,8 +224,45 @@ def main():
         action="store_true",
         help="Skip career page scraping",
     )
+    parser.add_argument(
+        "--audit-sources",
+        action="store_true",
+        help="Check every career source without touching job or notification state",
+    )
 
     args = parser.parse_args()
+
+    if args.audit_sources:
+        scraper = CareerScraper()
+        jobs, healthy, error = scraper.fetch_jobs_with_status()
+        healthy_count = 0
+        degraded_count = 0
+        failed_count = 0
+        print("\n=== Career Source Audit ===")
+        for company, result in scraper.last_company_results.items():
+            if result.healthy:
+                label = "OK"
+                healthy_count += 1
+            elif result.status.startswith("degraded_"):
+                label = "DEGRADED"
+                degraded_count += 1
+            else:
+                label = "FAILED"
+                failed_count += 1
+            print(
+                f"[{label}] {company}: {result.candidate_count} candidate(s), "
+                f"{len(result.jobs)} match(es) ({result.status})"
+            )
+            if result.error:
+                print(f"         {result.error}")
+        print(
+            f"\nSummary: {healthy_count} reliable, {degraded_count} degraded, "
+            f"{failed_count} failed; {len(jobs)} matching job(s)"
+        )
+        print(f"Aggregate careers health: {'healthy' if healthy else 'unhealthy'}")
+        if error:
+            print(f"Errors: {error}")
+        return
 
     storage = JobStorage()
     notifier = DiscordNotifier()

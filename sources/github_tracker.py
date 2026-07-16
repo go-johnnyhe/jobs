@@ -6,7 +6,7 @@ from typing import Optional
 import requests
 from bs4 import BeautifulSoup
 
-from config import GITHUB_REPOS, TARGET_COMPANIES
+from config import GITHUB_REPOS, ROLE_KEYWORDS, TARGET_COMPANIES
 from filters import matches_job_criteria
 from http_client import create_session
 from models import Job, ScrapeResult
@@ -187,6 +187,13 @@ class GitHubTracker:
         )
 
         if not company_match:
+            return False
+
+        title_lower = job.title.lower()
+        if not any(
+            re.search(r"(?<!\w)" + re.escape(keyword) + r"(?!\w)", title_lower)
+            for keyword in ROLE_KEYWORDS
+        ):
             return False
 
         # Use shared filter for seniority and location checks
