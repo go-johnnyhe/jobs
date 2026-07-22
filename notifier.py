@@ -355,6 +355,9 @@ class DiscordNotifier:
             location = job.get("location", "") or "Not specified"
             source = job.get("source", "")
 
+        if source == "career_page":
+            source = "Company career page"
+
         # Choose color based on company
         color = self._get_company_color(company)
 

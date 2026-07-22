@@ -74,6 +74,21 @@ def test_invalid_embed_url_is_omitted():
     assert "url" not in embed
 
 
+def test_career_source_label_is_user_friendly():
+    notifier = DiscordNotifier("https://discord.example/webhook")
+    job = Job(
+        company="Jane Street",
+        title="Software Engineer",
+        url="https://example.com/job",
+        location="New York, NY",
+        source="career_page",
+    )
+
+    embed = notifier._build_embed(job)
+
+    assert embed["fields"][1]["value"] == "Company career page"
+
+
 def test_backlog_summary_payload(monkeypatch):
     notifier = DiscordNotifier("https://discord.example/webhook")
     payloads = []

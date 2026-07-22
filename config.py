@@ -9,12 +9,12 @@ DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "")
 COMPANIES = {
     # Big Tech
     "Google": {
-        "url": "https://careers.google.com/jobs/results/?employment_type=FULL_TIME&q=software%20engineer%20new%20grad",
-        "ats": "internal",
+        "url": "https://www.google.com/about/careers/applications/jobs/results/?employment_type=FULL_TIME&q=software%20engineer&target_level=EARLY",
+        "ats": "google",
     },
     "Meta": {
-        "url": "https://www.metacareers.com/jobs?roles[0]=full-time&teams[0]=Software%20Engineering",
-        "ats": "internal",
+        "url": "https://www.metacareers.com/jobsearch/?teams[0]=University%20Grad%20-%20Engineering%2C%20Tech%20%26%20Design&roles[0]=full-time",
+        "ats": "meta",
     },
     "Amazon": {
         "url": "https://www.amazon.jobs/en/search?base_query=software+engineer+new+grad",
@@ -27,20 +27,38 @@ COMPANIES = {
         ],
     },
     "Apple": {
-        "url": "https://jobs.apple.com/en-us/search?sort=newest&search=software%20engineer%20new%20grad",
-        "ats": "internal",
+        "url": "https://jobs.apple.com/en-us/search",
+        "ats": "apple",
+        "search_queries": [
+            "new grad software engineer",
+            "entry level software engineer",
+            "early career software engineer",
+            "university graduate software engineer",
+            "associate software engineer",
+            "junior software engineer",
+            "software engineer i",
+            "software engineer 1",
+            "2026 software engineer",
+            "2027 software engineer",
+        ],
     },
     "Netflix": {
-        "url": "https://www.netflix.com/jobs",
-        "ats": "internal",
+        "url": "https://explore.jobs.netflix.net",
+        "ats": "eightfold_apply",
+        "ats_id": "netflix.com",
+        "search_queries": ["software engineer"],
     },
     "Microsoft": {
-        "url": "https://careers.microsoft.com/us/en/search-results?keywords=software%20engineer%20new%20grad",
-        "ats": "internal",
+        "url": "https://apply.careers.microsoft.com",
+        "ats": "eightfold",
+        "ats_id": "microsoft.com",
+        "search_queries": ["software engineer"],
+        "search_location": "United States",
     },
     "Stripe": {
         "url": "https://stripe.com/jobs/search?teams=Engineering",
-        "ats": "internal",
+        "ats": "structured_html",
+        "site_parser": "stripe",
     },
     "Block": {
         "url": "https://block.xyz/careers?teams=Engineering",
@@ -54,8 +72,10 @@ COMPANIES = {
         "ats_id": "cloudflare",
     },
     "HashiCorp": {
-        "url": "https://www.hashicorp.com/careers/open-positions?department=Engineering",
-        "ats": "internal",
+        "url": "https://www.ibm.com/careers/search?department=Engineering&q=hashicorp",
+        "ats": "ibm_search",
+        "search_query": "hashicorp",
+        "required_posting_term": "hashicorp",
     },
     "Datadog": {
         "url": "https://careers.datadoghq.com/all-jobs/?team=Engineering",
@@ -63,8 +83,9 @@ COMPANIES = {
         "ats_id": "datadog",
     },
     "Confluent": {
-        "url": "https://careers.confluent.io/search/engineering/jobs",
-        "ats": "internal",
+        "url": "https://careers.confluent.io/jobs/engineering?engineering=engineering",
+        "ats": "structured_html",
+        "site_parser": "confluent",
     },
     "CockroachLabs": {
         "url": "https://boards.greenhouse.io/cockroachlabs",
@@ -137,11 +158,13 @@ COMPANIES = {
     # High-Growth Startups
     "Flyio": {
         "url": "https://fly.io/jobs/",
-        "ats": "internal",
+        "ats": "atom",
+        "feed_url": "https://fly.io/jobs/feed.xml",
     },
     "Railway": {
-        "url": "https://railway.app/careers",
-        "ats": "internal",
+        "url": "https://railway.com/careers",
+        "ats": "structured_html",
+        "site_parser": "railway",
     },
     "Render": {
         "url": "https://render.com/careers#open-positions",
@@ -161,8 +184,9 @@ COMPANIES = {
     },
     # Fintech
     "Plaid": {
-        "url": "https://plaid.com/careers/openings/",
-        "ats": "internal",
+        "url": "https://plaid.com/careers/",
+        "ats": "structured_html",
+        "site_parser": "plaid",
     },
     "Robinhood": {
         "url": "https://boards.greenhouse.io/robinhood",
@@ -222,7 +246,8 @@ COMPANIES = {
     },
     "Grafana": {
         "url": "https://grafana.com/about/careers/open-positions/",
-        "ats": "internal",
+        "ats": "greenhouse",
+        "ats_id": "grafanalabs",
     },
     # Dev Tools & Productivity
     "Figma": {
@@ -251,11 +276,12 @@ COMPANIES = {
     },
     "Miro": {
         "url": "https://miro.com/careers/open-positions/",
-        "ats": "internal",
+        "ats": "miro",
     },
     "Retool": {
-        "url": "https://retool.com/careers#jobs",
-        "ats": "internal",
+        "url": "https://retool.com/careers",
+        "ats": "structured_html",
+        "site_parser": "retool",
     },
     "Airtable": {
         "url": "https://airtable.com/careers#openings",
@@ -264,8 +290,10 @@ COMPANIES = {
     },
     # Consumer Tech
     "Uber": {
-        "url": "https://www.uber.com/us/en/careers/list/?query=software%20engineer",
-        "ats": "internal",
+        "url": "https://iaziqy.fa.ocs.oraclecloud.com/hcmUI/CandidateExperience/en/sites/UberCareers",
+        "ats": "oracle_ce",
+        "api_url": "https://iaziqy.fa.ocs.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions",
+        "site_number": "CX_1",
     },
     "Lyft": {
         "url": "https://www.lyft.com/careers#openings",
@@ -289,7 +317,7 @@ COMPANIES = {
     },
     "Spotify": {
         "url": "https://www.lifeatspotify.com/jobs?c=engineering",
-        "ats": "internal",
+        "ats": "spotify",
     },
     "Reddit": {
         "url": "https://www.redditinc.com/careers?team=engineering",
@@ -302,8 +330,8 @@ COMPANIES = {
         "ats_id": "pinterest",
     },
     "Snap": {
-        "url": "https://snap.com/en-US/jobs?teams=Engineering",
-        "ats": "internal",
+        "url": "https://wd1.myworkdaysite.com/recruiting/snapchat/snap",
+        "ats": "workday",
     },
     "Twitter": {
         "url": "https://x.com/careers",
@@ -311,12 +339,16 @@ COMPANIES = {
     },
     # Seattle Tech
     "Redfin": {
-        "url": "https://www.redfin.com/about/jobs",
-        "ats": "internal",
+        "url": "https://careers.rocket.com/us/en",
+        "ats": "phenom",
+        # Searching the brand returns the complete Redfin subset of Rocket jobs.
+        "search_queries": ["Redfin"],
+        "posting_company_names": ["Redfin Corporation"],
     },
     "Qualtrics": {
-        "url": "https://www.qualtrics.com/careers/us/en/search-results",
-        "ats": "internal",
+        "url": "https://www.qualtrics.com/careers/us/en",
+        "ats": "phenom",
+        "search_queries": ["software"],
     },
     # AI/ML Companies
     "Anthropic": {
@@ -326,11 +358,13 @@ COMPANIES = {
     },
     "OpenAI": {
         "url": "https://openai.com/careers/search",
-        "ats": "internal",
+        "ats": "ashby",
+        "ats_id": "openai",
     },
     "ScaleAI": {
         "url": "https://scale.com/careers",
-        "ats": "internal",
+        "ats": "greenhouse",
+        "ats_id": "scaleai",
     },
     "Cohere": {
         "url": "https://cohere.com/careers#open-roles",
@@ -338,13 +372,14 @@ COMPANIES = {
         "ats_id": "cohere",
     },
     "Hugging Face": {
-        "url": "https://huggingface.co/careers",
-        "ats": "internal",
+        "url": "https://apply.workable.com/huggingface",
+        "ats": "workable",
+        "ats_id": "huggingface",
     },
     # Enterprise Software
     "Salesforce": {
-        "url": "https://careers.salesforce.com/en/jobs/?search=software+engineer",
-        "ats": "internal",
+        "url": "https://www.salesforce.com/company/careers/jobs/",
+        "ats": "salesforce",
     },
     "Adobe": {
         "url": "https://adobe.wd5.myworkdayjobs.com/external_experienced",
@@ -370,8 +405,10 @@ COMPANIES = {
         "ats_id": "palantir",
     },
     "Splunk": {
-        "url": "https://www.splunk.com/en_us/careers.html",
-        "ats": "internal",
+        "url": "https://careers.cisco.com/global/en",
+        "ats": "phenom",
+        "search_queries": ["Splunk"],
+        "required_posting_terms": ["splunk"],
     },
     "Palo Alto Networks": {
         "url": "https://paloaltonetworks.wd5.myworkdayjobs.com/panwexternalcareers",
@@ -380,7 +417,7 @@ COMPANIES = {
     # Quant/Trading
     "Jane Street": {
         "url": "https://www.janestreet.com/join-jane-street/open-roles/",
-        "ats": "internal",
+        "ats": "jane_street",
     },
     "Two Sigma": {
         "url": "https://www.twosigma.com/careers/",
@@ -399,13 +436,14 @@ COMPANIES = {
         "ats": "internal",
     },
     "Optiver": {
-        "url": "https://optiver.com/working-at-optiver/career-opportunities/",
-        "ats": "internal",
+        "url": "https://www.optiver.com/join-us/jobs/",
+        "ats": "optiver",
     },
     # E-commerce/Retail Tech
     "Shopify": {
-        "url": "https://www.shopify.com/careers/search?teams%5B%5D=engineering",
-        "ats": "internal",
+        "url": "https://www.shopify.com/careers?teams%5B%5D=engineering",
+        "ats": "structured_html",
+        "site_parser": "shopify",
     },
     "Etsy": {
         "url": "https://careers.etsy.com/en",
@@ -416,8 +454,11 @@ COMPANIES = {
         "ats": "internal",
     },
     "Chewy": {
-        "url": "https://careers.chewy.com/us/en/search-results?keywords=software",
-        "ats": "internal",
+        "url": "https://careers.chewy.com",
+        "ats": "phenom",
+        "search_queries": ["software", "engineer"],
+        "search_country": "us",
+        "search_locale": "en_us",
     },
     # Gaming
     "Roblox": {
@@ -442,8 +483,12 @@ COMPANIES = {
         "ats_id": "gusto",
     },
     "Rippling": {
-        "url": "https://www.rippling.com/careers/all-openings",
-        "ats": "internal",
+        "url": "https://www.rippling.com/careers/open-roles",
+        "ats": "rippling",
+        "ats_id": "careers_en-US_production",
+        "algolia_app_id": "6FNAX3TBEF",
+        # Public, search-only browser key embedded in Rippling's careers app.
+        "algolia_public_search_key": "416caa4690f002ff6fe4a2097623640b",
     },
     "Navan": {
         "url": "https://navan.com/careers#702a6c37c14845ae9b51a5e4f5ea4d18",
@@ -452,7 +497,8 @@ COMPANIES = {
     },
     "Zapier": {
         "url": "https://zapier.com/jobs",
-        "ats": "internal",
+        "ats": "ashby",
+        "ats_id": "Zapier",
     },
     "Asana": {
         "url": "https://asana.com/jobs/all",
@@ -656,6 +702,7 @@ TITLE_EXCLUSIONS = [
     "support engineer",
     "it engineer",
     "network engineer",
+    "network operations",
     "systems administrator",
     "helpdesk",
     # Other non-SWE
