@@ -28,3 +28,41 @@ def test_non_engineering_role_is_rejected():
     )
 
     assert tracker._matches_criteria(job) is False
+
+
+def test_fetch_uses_configured_raw_branch_without_github_api(monkeypatch):
+    tracker = GitHubTracker()
+    requested_urls = []
+
+    class Response:
+        text = """
+        <table><tr>
+          <td>Figma</td>
+          <td>Software Engineer, New Grad</td>
+          <td>New York, NY</td>
+          <td><a href="https://figma.example/jobs/1">Apply</a></td>
+          <td>1d</td>
+        </tr></table>
+        """
+
+        def raise_for_status(self):
+            return None
+
+    def fake_get(url, **_kwargs):
+        requested_urls.append(url)
+        return Response()
+
+    monkeypatch.setattr(tracker.session, "get", fake_get)
+    result = tracker._fetch_from_repo({
+        "owner": "SimplifyJobs",
+        "repo": "New-Grad-Positions",
+        "branch": "dev",
+        "file": "README.md",
+    })
+
+    assert requested_urls == [
+        "https://raw.githubusercontent.com/"
+        "SimplifyJobs/New-Grad-Positions/dev/README.md"
+    ]
+    assert result.healthy is True
+    assert [job.company for job in result.jobs] == ["Figma"]

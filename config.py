@@ -57,13 +57,41 @@ COMPANIES = {
     },
     "Stripe": {
         "url": "https://stripe.com/jobs/search?teams=Engineering",
-        "ats": "structured_html",
-        "site_parser": "stripe",
+        "ats": "greenhouse",
+        "ats_id": "stripe",
     },
     "Block": {
         "url": "https://block.xyz/careers?teams=Engineering",
         "ats": "greenhouse",
         "ats_id": "block",
+    },
+    "NVIDIA": {
+        "url": "https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite",
+        "ats": "workday",
+    },
+    "LinkedIn": {
+        "url": "https://job-boards.greenhouse.io/linkedin",
+        "ats": "greenhouse",
+        "ats_id": "linkedin",
+    },
+    "Oracle": {
+        "url": "https://eeho.fa.us2.oraclecloud.com/hcmUI/CandidateExperience/en/sites/jobsearch/jobs",
+        "ats": "oracle_ce",
+        "api_url": "https://eeho.fa.us2.oraclecloud.com/hcmRestApi/resources/latest/recruitingCEJobRequisitions",
+        "site_number": "CX_45001",
+    },
+    "Cisco": {
+        "url": "https://careers.cisco.com/global/en",
+        "ats": "phenom",
+        "search_queries": [
+            "software engineer",
+            "software developer",
+            "new grad software",
+        ],
+    },
+    "Intel": {
+        "url": "https://intel.wd1.myworkdayjobs.com/External",
+        "ats": "workday",
     },
     # Cloud & Infrastructure
     "Cloudflare": {
@@ -84,8 +112,8 @@ COMPANIES = {
     },
     "Confluent": {
         "url": "https://careers.confluent.io/jobs/engineering?engineering=engineering",
-        "ats": "structured_html",
-        "site_parser": "confluent",
+        "ats": "ashby",
+        "ats_id": "confluent",
     },
     "CockroachLabs": {
         "url": "https://boards.greenhouse.io/cockroachlabs",
@@ -110,7 +138,9 @@ COMPANIES = {
     # Developer Tools
     "GitHub": {
         "url": "https://www.github.careers/careers-home/jobs?categories=Engineering",
-        "ats": "internal",
+        "ats": "jibe",
+        "api_url": "https://www.github.careers/api/jobs",
+        "search_category": "Engineering",
     },
     "GitLab": {
         "url": "https://about.gitlab.com/jobs/all-jobs/?department=Engineering",
@@ -142,10 +172,15 @@ COMPANIES = {
         "ats": "ashby",
         "ats_id": "replit",
     },
+    "Dropbox": {
+        "url": "https://job-boards.greenhouse.io/dropbox",
+        "ats": "greenhouse",
+        "ats_id": "dropbox",
+    },
     # Seattle Companies
     "Expedia": {
-        "url": "https://careers.expediagroup.com/jobs/?filter[category]=Technology",
-        "ats": "internal",
+        "url": "https://expedia.wd108.myworkdayjobs.com/search",
+        "ats": "workday",
     },
     "Zillow": {
         "url": "https://zillow.wd5.myworkdayjobs.com/Zillow_Group_External?q=software%20engineer",
@@ -223,6 +258,10 @@ COMPANIES = {
         "ats": "greenhouse",
         "ats_id": "sofi",
     },
+    "Capital One": {
+        "url": "https://capitalone.wd12.myworkdayjobs.com/Capital_One",
+        "ats": "workday",
+    },
     # Cloud/Data Infrastructure
     "Databricks": {
         "url": "https://www.databricks.com/company/careers/open-positions",
@@ -267,7 +306,9 @@ COMPANIES = {
     },
     "Atlassian": {
         "url": "https://www.atlassian.com/company/careers/all-jobs",
-        "ats": "internal",
+        "ats": "jibe",
+        "api_url": "https://join.atlassian.com/api/jobs",
+        "search_category": "Engineering",
     },
     "Twilio": {
         "url": "https://www.twilio.com/en-us/company/jobs",
@@ -361,6 +402,11 @@ COMPANIES = {
         "ats": "ashby",
         "ats_id": "openai",
     },
+    "xAI": {
+        "url": "https://x.ai/careers",
+        "ats": "greenhouse",
+        "ats_id": "xai",
+    },
     "ScaleAI": {
         "url": "https://scale.com/careers",
         "ats": "greenhouse",
@@ -420,20 +466,21 @@ COMPANIES = {
         "ats": "jane_street",
     },
     "Two Sigma": {
-        "url": "https://www.twosigma.com/careers/",
-        "ats": "internal",
+        "url": "https://careers.twosigma.com/careers/OpenRoles/",
+        "ats": "two_sigma",
     },
     "Citadel": {
         "url": "https://www.citadel.com/careers/open-opportunities/",
         "ats": "internal",
     },
     "HRT": {
-        "url": "https://www.hudsonrivertrading.com/careers/",
-        "ats": "internal",
+        "url": "https://boards.greenhouse.io/hrttalentcommunity",
+        "ats": "greenhouse",
+        "ats_id": "hrttalentcommunity",
     },
     "DE Shaw": {
         "url": "https://www.deshaw.com/careers",
-        "ats": "internal",
+        "ats": "de_shaw",
     },
     "Optiver": {
         "url": "https://www.optiver.com/join-us/jobs/",
@@ -446,11 +493,11 @@ COMPANIES = {
         "site_parser": "shopify",
     },
     "Etsy": {
-        "url": "https://careers.etsy.com/en",
-        "ats": "internal",
+        "url": "https://careers.etsy.com/jobs/search",
+        "ats": "etsy",
     },
     "Wayfair": {
-        "url": "https://www.wayfair.com/careers/jobs?teamIds=6&gh_jid=",
+        "url": "https://www.wayfair.com/careers/jobs?teamIds=1",
         "ats": "internal",
     },
     "Chewy": {
@@ -512,6 +559,7 @@ GITHUB_REPOS = [
     {
         "owner": "SimplifyJobs",
         "repo": "New-Grad-Positions",
+        "branch": "dev",
         "file": "README.md",
     },
 ]
@@ -547,23 +595,39 @@ ROLE_KEYWORDS = [
 CAREER_ENTRY_LEVEL_KEYWORDS = [
     "new grad",
     "new graduate",
+    "new college grad",
+    "college grad",
+    "college graduate",
+    "recent grad",
+    "recent graduate",
     "university grad",
     "university graduate",
     "graduate software",
+    "graduate engineer",
     "software engineer i",
     "software engineer 1",
+    "software developer i",
+    "software developer 1",
     "sde i",
     "sde 1",
     "swe i",
     "swe 1",
+    "engineer i",
+    "engineer 1",
+    "developer i",
+    "developer 1",
     "entry level",
     "entry-level",
     "early career",
     "early-career",
     "junior",
     "associate software engineer",
+    "associate software developer",
+    "campus hire",
+    "campus graduate",
     "2026",
     "2027",
+    "2028",
 ]
 
 # Generic career pages often mix real openings with articles and employee stories.
@@ -620,6 +684,7 @@ COMPANY_ALIASES = {
     "Epic Games": ["epicgames"],
     "Riot Games": ["riot"],
     "Navan": ["tripactions"],
+    "xAI": ["x.ai"],
 }
 
 # Auto-derived from COMPANIES keys + COMPANY_ALIASES values
@@ -635,6 +700,14 @@ PRIORITY_COMPANIES = [
     "Microsoft",
     "Apple",
     "Amazon",
+    "NVIDIA",
+    "LinkedIn",
+    "Netflix",
+    "GitHub",
+    "Stripe",
+    "OpenAI",
+    "Anthropic",
+    "xAI",
 ]
 
 # Consecutive-failure counts that trigger source health alerts.
@@ -643,9 +716,9 @@ SOURCE_FAILURE_ALERT_THRESHOLDS = [3, 6, 12]
 # Company-level alerts should fire once per failure streak, then recover.
 COMPANY_FAILURE_ALERT_THRESHOLDS = [3]
 
-# Company scrape failures are noisy and often mean a career page changed, not
-# that the job tracker itself is broken. Keep these in stats/logs by default.
-ENABLE_COMPANY_HEALTH_ALERTS = False
+# Alert only after repeated failures at the high-value sources above. A broken
+# direct feed can otherwise silently miss a short-lived new-grad posting.
+ENABLE_COMPANY_HEALTH_ALERTS = True
 
 # Career source is considered healthy only if enough company scrapes succeed.
 CAREERS_MIN_HEALTHY_SUCCESS_RATE = 0.25
@@ -680,8 +753,10 @@ TITLE_EXCLUSIONS = [
     # Mobile-specific (user wants web/backend focus)
     "android engineer",
     "android developer",
+    "android mobile",
     "ios engineer",
     "ios developer",
+    "ios mobile",
     "mobile engineer",
     "mobile developer",
     # QA/Test roles
@@ -692,9 +767,21 @@ TITLE_EXCLUSIONS = [
     "automation engineer",
     "quality engineer",
     # Hardware/Embedded (not software)
+    "asic",
+    "circuit design",
+    "dft engineer",
+    "formal verification",
     "hardware engineer",
+    "hardware tools",
     "embedded engineer",
+    "embedded systems",
     "firmware engineer",
+    "physical design",
+    "power optimization",
+    "rtl power",
+    "verification engineer",
+    "cell modeling",
+    "cell modelling",
     "electrical engineer",
     "mechanical engineer",
     "manufacturing engineer",
@@ -710,6 +797,8 @@ TITLE_EXCLUSIONS = [
     "application engineer",
     "implementation engineer",
     "integration engineer",
+    "product marketing engineer",
+    "technical product marketing",
 ]
 
 # Blocked locations - explicitly reject jobs in these locations

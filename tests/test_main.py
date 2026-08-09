@@ -178,13 +178,14 @@ def test_no_pending_notifications_succeeds():
     assert storage.marked == []
 
 
-def test_company_alerts_fire_once_per_failure_streak(tmp_path):
+def test_company_alerts_can_be_disabled(monkeypatch, tmp_path):
     storage = JobStorage(db_path=str(tmp_path / "test.db"))
     notifier = FakeCompanyNotifier()
     result = ScrapeResult(
         status="parse_failure",
         error="Meta: no candidate job links found",
     )
+    monkeypatch.setattr(main, "ENABLE_COMPANY_HEALTH_ALERTS", False)
 
     for _ in range(12):
         main._update_company_health(

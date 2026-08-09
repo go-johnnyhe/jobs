@@ -556,6 +556,8 @@ def test_meta_adapter_discovers_query_and_uses_grad_metadata(monkeypatch):
     assert result.candidate_count == 1
     assert [job.title for job in result.jobs] == ["Software Engineer"]
     assert posts[0]["doc_id"] == "27506805582236862"
+    search_input = __import__("json").loads(posts[0]["variables"])["search_input"]
+    assert search_input == {"results_per_page": None}
 
 
 def test_oracle_candidate_experience_adapter_paginates(monkeypatch):
@@ -611,7 +613,51 @@ def test_oracle_candidate_experience_adapter_paginates(monkeypatch):
     assert offsets == [0, 1]
     assert result.candidate_count == 2
     assert [job.title for job in result.jobs] == ["Software Engineer I"]
-    assert result.jobs[0].url.endswith("/job/1")
+    assert result.jobs[0].url == "https://oracle.example/sites/UberCareers/job/1"
+
+
+def test_oracle_candidate_experience_allows_duplicate_result_rows(monkeypatch):
+    scraper = cs.CareerScraper()
+
+    class Response:
+        def __init__(self, offset):
+            self.offset = offset
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "items": [{
+                    "TotalJobsCount": 2,
+                    "requisitionList": {
+                        "items": [{
+                            "Id": "1",
+                            "Title": "Software Developer 1",
+                            "PrimaryLocation": "Seattle, WA, United States",
+                        }]
+                    },
+                }]
+            }
+
+    def fake_get(_url, params, **_kwargs):
+        offset = int(params["finder"].split("offset=")[1])
+        return Response(offset)
+
+    monkeypatch.setattr(scraper.session, "get", fake_get)
+    result = scraper._scrape_company(
+        "Oracle",
+        {
+            "ats": "oracle_ce",
+            "url": "https://oracle.example/sites/jobsearch/jobs",
+            "api_url": "https://oracle.example/requisitions",
+            "site_number": "CX_1",
+        },
+    )
+
+    assert result.healthy is True
+    assert result.candidate_count == 1
+    assert [job.title for job in result.jobs] == ["Software Developer 1"]
 
 
 def test_ibm_hashicorp_adapter_uses_official_experience_level(monkeypatch):
@@ -1218,3 +1264,401 @@ def test_atom_feed_adapter_accepts_valid_empty_feed(monkeypatch):
 
     assert result.healthy is True
     assert result.candidate_count == 0
+
+
+def test_greenhouse_checks_total_and_uses_canonical_url(monkeypatch):
+    scraper = cs.CareerScraper()
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "meta": {"total": 1},
+                "jobs": [{
+                    "id": 1,
+                    "title": "Software Engineer I",
+                    "absolute_url": "https://acme.example/jobs/1",
+                    "location": {"name": "Seattle, WA"},
+                }],
+            }
+
+    monkeypatch.setattr(scraper.session, "get", lambda *_args, **_kwargs: Response())
+    result = scraper._scrape_company(
+        "Acme",
+        {
+            "ats": "greenhouse",
+            "ats_id": "acme",
+            "url": "https://acme.example/careers",
+        },
+    )
+
+    assert result.healthy is True
+    assert result.candidate_count == 1
+    assert result.jobs[0].url == "https://acme.example/jobs/1"
+
+
+def test_jibe_adapter_paginates_to_advertised_total(monkeypatch):
+    scraper = cs.CareerScraper()
+    requested_pages = []
+
+    class Response:
+        def __init__(self, page):
+            self.page = page
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            records = {
+                1: {
+                    "title": "Software Engineer I",
+                    "apply_url": "https://careers.example/jobs/1",
+                    "location_name": "Seattle - United States",
+                    "posted_date": "2026-08-01",
+                },
+                2: {
+                    "title": "Senior Software Engineer",
+                    "apply_url": "https://careers.example/jobs/2",
+                    "location_name": "Seattle - United States",
+                },
+            }
+            return {"totalCount": 2, "jobs": [{"data": records[self.page]}]}
+
+    def fake_get(_url, params, **_kwargs):
+        requested_pages.append(params["page"])
+        return Response(params["page"])
+
+    monkeypatch.setattr(scraper.session, "get", fake_get)
+    result = scraper._scrape_company(
+        "Acme",
+        {
+            "ats": "jibe",
+            "url": "https://careers.example/jobs",
+            "api_url": "https://careers.example/api/jobs",
+            "search_category": "Engineering",
+        },
+    )
+
+    assert requested_pages == [1, 2]
+    assert result.candidate_count == 2
+    assert [job.title for job in result.jobs] == ["Software Engineer I"]
+
+
+def test_jibe_adapter_rejects_unparseable_advertised_job(monkeypatch):
+    scraper = cs.CareerScraper()
+
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"totalCount": 1, "jobs": [{"unexpected": "schema"}]}
+
+    monkeypatch.setattr(scraper.session, "get", lambda *_args, **_kwargs: Response())
+    result = scraper._scrape_company(
+        "Acme",
+        {
+            "ats": "jibe",
+            "url": "https://careers.example/jobs",
+            "api_url": "https://careers.example/api/jobs",
+        },
+    )
+
+    assert result.status == "parse_failure"
+    assert "malformed Jibe job record" in result.error
+
+
+def test_two_sigma_adapter_follows_next_page_and_uses_early_career_metadata(
+    monkeypatch,
+):
+    scraper = cs.CareerScraper()
+    requested_offsets = []
+
+    class Response:
+        def __init__(self, offset):
+            title = "Software Engineer" if offset == 0 else "Senior Software Engineer"
+            next_link = (
+                '<a href="?jobRecordsPerPage=10&amp;jobOffset=10">Next &gt;&gt;</a>'
+                if offset == 0
+                else ""
+            )
+            self.text = f"""
+              <article class="article article--result">
+                <h3 class="article__header__text__title">
+                  <a href="/careers/JobDetail/{offset}">{title}</a>
+                </h3>
+                <div class="article__header__content__text">
+                  <span>United States - WA Seattle</span>
+                </div>
+                <div>Engineering {'Early Careers' if offset == 0 else 'Experienced'}</div>
+              </article>
+              {next_link}
+            """
+
+        def raise_for_status(self):
+            return None
+
+    def fake_get(_url, params, **_kwargs):
+        requested_offsets.append(params["jobOffset"])
+        return Response(params["jobOffset"])
+
+    monkeypatch.setattr(scraper.session, "get", fake_get)
+    result = scraper._scrape_company(
+        "Two Sigma",
+        {
+            "ats": "two_sigma",
+            "url": "https://careers.twosigma.example/careers/OpenRoles/",
+        },
+    )
+
+    assert requested_offsets == [0, 10]
+    assert result.candidate_count == 2
+    assert [job.title for job in result.jobs] == ["Software Engineer"]
+
+
+def test_de_shaw_adapter_uses_only_public_embedded_jobs(monkeypatch):
+    scraper = cs.CareerScraper()
+    payload = {
+        "props": {
+            "pageProps": {
+                "jobsFetchingError": False,
+                "regularJobs": [{
+                    "data": {
+                        "id": 1,
+                        "displayName": "Software Developer",
+                        "jobUrl": "Software-Developer-1",
+                        "validFromDate": "2026-08-01",
+                        "jobMetadata": {
+                            "jobSeekerCategories": ["Student"],
+                            "jobLocations": [{"name": "New York"}],
+                        },
+                    }
+                }],
+                "internships": [{
+                    "data": {
+                        "id": 2,
+                        "displayName": "Software Developer Intern",
+                        "jobUrl": "Software-Developer-Intern-2",
+                        "jobMetadata": {
+                            "jobSeekerCategories": ["Student"],
+                            "jobLocations": [{"name": "New York"}],
+                        },
+                    }
+                }],
+                "internalJobs": [{"data": {"id": 3}}],
+            }
+        }
+    }
+
+    class Response:
+        text = (
+            '<script id="__NEXT_DATA__">'
+            + __import__("json").dumps(payload)
+            + "</script>"
+        )
+
+        def raise_for_status(self):
+            return None
+
+    monkeypatch.setattr(scraper.session, "get", lambda *_args, **_kwargs: Response())
+    result = scraper._scrape_company(
+        "DE Shaw",
+        {"ats": "de_shaw", "url": "https://www.deshaw.example/careers"},
+    )
+
+    assert result.candidate_count == 2
+    assert [job.title for job in result.jobs] == ["Software Developer"]
+    assert result.jobs[0].location == "New York"
+
+
+def test_etsy_adapter_fetches_every_advertised_page(monkeypatch):
+    scraper = cs.CareerScraper()
+    requested_pages = []
+
+    class Response:
+        def __init__(self, page):
+            title = "Software Engineer I" if page == 1 else "Senior Software Engineer"
+            pagination = '<a href="/jobs/search?page=2">2</a>' if page == 1 else ""
+            self.text = f"""
+              <article class="job-search-results-card-col">
+                <h3 class="job-search-results-card-title">
+                  <a href="/jobs/{page}">{title}</a>
+                </h3>
+                <li class="job-component-workplace-type">Hybrid</li>
+                <li class="job-component-location">Brooklyn, New York, United States</li>
+              </article>
+              {pagination}
+            """
+
+        def raise_for_status(self):
+            return None
+
+    def fake_get(_url, params, **_kwargs):
+        requested_pages.append(params["page"])
+        return Response(params["page"])
+
+    monkeypatch.setattr(scraper.session, "get", fake_get)
+    result = scraper._scrape_company(
+        "Etsy",
+        {"ats": "etsy", "url": "https://careers.etsy.example/jobs/search"},
+    )
+
+    assert requested_pages == [1, 2]
+    assert result.candidate_count == 2
+    assert [job.title for job in result.jobs] == ["Software Engineer I"]
+
+
+def test_workday_rejects_incomplete_pagination(monkeypatch):
+    scraper = cs.CareerScraper()
+    requested_offsets = []
+
+    class Response:
+        status_code = 200
+
+        def __init__(self, offset):
+            self.offset = offset
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            if self.offset == 0:
+                return {
+                    "total": 2,
+                    "jobPostings": [{
+                        "title": "Software Engineer I",
+                        "externalPath": "/job/1",
+                        "locationsText": "Seattle, WA",
+                    }],
+                }
+            return {"total": 2, "jobPostings": []}
+
+    def fake_post(_url, json, **_kwargs):
+        requested_offsets.append(json["offset"])
+        return Response(json["offset"])
+
+    monkeypatch.setattr(scraper.session, "post", fake_post)
+    result = scraper._scrape_company(
+        "Acme",
+        {
+            "ats": "workday",
+            "url": "https://acme.wd5.myworkdayjobs.com/External",
+        },
+    )
+
+    assert requested_offsets == [0, 1]
+    assert result.status == "parse_failure"
+    assert result.candidate_count == 1
+    assert "ended at 1/2 jobs" in result.error
+
+
+def test_workday_uses_latest_total_when_feed_grows(monkeypatch):
+    scraper = cs.CareerScraper()
+    requested_offsets = []
+
+    class Response:
+        status_code = 200
+
+        def __init__(self, offset):
+            self.offset = offset
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            total = 2 if self.offset == 0 else 3
+            return {
+                "total": total,
+                "jobPostings": [{
+                    "title": f"Software Engineer {self.offset + 1}",
+                    "externalPath": f"/job/{self.offset + 1}",
+                    "locationsText": "Seattle, WA",
+                }],
+            }
+
+    def fake_post(_url, json, **_kwargs):
+        requested_offsets.append(json["offset"])
+        return Response(json["offset"])
+
+    monkeypatch.setattr(scraper.session, "post", fake_post)
+    result = scraper._scrape_company(
+        "Acme",
+        {
+            "ats": "workday",
+            "url": "https://acme.wd5.myworkdayjobs.com/External",
+        },
+    )
+
+    assert requested_offsets == [0, 1, 2]
+    assert result.healthy is True
+    assert result.candidate_count == 3
+
+
+def test_workday_keeps_first_page_total_when_later_pages_report_zero(monkeypatch):
+    scraper = cs.CareerScraper()
+
+    class Response:
+        status_code = 200
+
+        def __init__(self, offset):
+            self.offset = offset
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "total": 2 if self.offset == 0 else 0,
+                "jobPostings": [{
+                    "title": f"Software Engineer {self.offset + 1}",
+                    "externalPath": f"/job/{self.offset + 1}",
+                    "locationsText": "Seattle, WA",
+                }],
+            }
+
+    monkeypatch.setattr(
+        scraper.session,
+        "post",
+        lambda _url, json, **_kwargs: Response(json["offset"]),
+    )
+    result = scraper._scrape_company(
+        "Acme",
+        {
+            "ats": "workday",
+            "url": "https://acme.wd5.myworkdayjobs.com/External",
+        },
+    )
+
+    assert result.healthy is True
+    assert result.candidate_count == 2
+
+
+def test_workday_detail_urls_keep_candidate_site_path():
+    scraper = cs.CareerScraper()
+    posting = {
+        "title": "Software Engineer I",
+        "externalPath": "/job/Seattle/Software-Engineer/JR1",
+        "locationsText": "Seattle, WA",
+    }
+
+    legacy = scraper._parse_workday_job(
+        "NVIDIA",
+        posting,
+        "https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite/",
+    )
+    modern = scraper._parse_workday_job(
+        "Snap",
+        posting,
+        "https://wd1.myworkdaysite.com/recruiting/snapchat/snap/",
+    )
+
+    assert legacy.url == (
+        "https://nvidia.wd5.myworkdayjobs.com/"
+        "NVIDIAExternalCareerSite/job/Seattle/Software-Engineer/JR1"
+    )
+    assert modern.url == (
+        "https://wd1.myworkdaysite.com/recruiting/"
+        "snapchat/snap/job/Seattle/Software-Engineer/JR1"
+    )

@@ -58,9 +58,16 @@ class GitHubTracker:
         """Fetch jobs from a single GitHub repository."""
         owner = repo_config["owner"]
         repo = repo_config["repo"]
+        branch = repo_config.get("branch", "main")
         file_path = repo_config["file"]
 
-        url = f"https://api.github.com/repos/{owner}/{repo}/contents/{file_path}"
+        # The unauthenticated GitHub Contents API is limited to 60 requests per
+        # hour per runner IP. Raw content is the same authoritative branch data
+        # without making the hourly tracker share that small API quota.
+        url = (
+            f"https://raw.githubusercontent.com/{owner}/{repo}/"
+            f"{branch}/{file_path}"
+        )
 
         try:
             response = self.session.get(url, timeout=30)

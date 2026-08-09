@@ -96,6 +96,16 @@ def has_excluded_title(title: str) -> bool:
     """
     title_lower = title.lower()
 
+    # Domain words can appear before or after the software title, so phrase
+    # exclusions alone miss forms such as "Software Engineer I, Mobile".
+    if re.search(
+        r"\b(?:android|ios|mobile|embedded|firmware|hardware)\b",
+        title_lower,
+    ):
+        return True
+    if re.search(r"\bsolutions?\s+engineer\b", title_lower):
+        return True
+
     for exclusion in TITLE_EXCLUSIONS:
         if exclusion in title_lower:
             return True

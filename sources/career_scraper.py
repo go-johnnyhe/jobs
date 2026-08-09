@@ -133,6 +133,12 @@ class CareerScraper:
                     company_name,
                     company_id=config.get("ats_id"),
                 )
+            elif ats == "jibe":
+                return self._scrape_jibe(
+                    company_name,
+                    api_url=config.get("api_url"),
+                    category=config.get("search_category"),
+                )
             elif ats == "eightfold":
                 return self._scrape_eightfold(
                     company_name,
@@ -177,6 +183,12 @@ class CareerScraper:
                 )
             elif ats == "jane_street":
                 return self._scrape_jane_street(company_name)
+            elif ats == "two_sigma":
+                return self._scrape_two_sigma(company_name, url)
+            elif ats == "de_shaw":
+                return self._scrape_de_shaw(company_name, url)
+            elif ats == "etsy":
+                return self._scrape_etsy(company_name, url)
             elif ats == "rippling":
                 return self._scrape_rippling(
                     company_name,
@@ -246,6 +258,21 @@ class CareerScraper:
                 response.raise_for_status()
                 data = response.json()
                 postings = data.get("jobs", [])
+                advertised_total = data.get("meta", {}).get("total")
+                if not isinstance(postings, list):
+                    raise ValueError("missing Greenhouse jobs")
+                if (
+                    advertised_total is not None
+                    and len(postings) != int(advertised_total)
+                ):
+                    return ScrapeResult(
+                        status="parse_failure",
+                        candidate_count=len(postings),
+                        error=(
+                            f"{company_name} ({api_url}): parsed "
+                            f"{len(postings)}/{advertised_total} advertised jobs"
+                        ),
+                    )
 
                 for job_data in postings:
                     job = self._parse_greenhouse_job(company_name, job_data, board_id)
@@ -322,7 +349,10 @@ class CareerScraper:
         if not title or not job_id:
             return None
 
-        url = f"https://boards.greenhouse.io/{board_id}/jobs/{job_id}"
+        url = (
+            job_data.get("absolute_url")
+            or f"https://boards.greenhouse.io/{board_id}/jobs/{job_id}"
+        )
 
         return Job(
             company=company_name,
@@ -399,6 +429,8 @@ class CareerScraper:
             response.raise_for_status()
             data = response.json()
             postings = data.get("jobs", [])
+            if not isinstance(postings, list):
+                raise ValueError("missing Ashby jobs")
             jobs = []
             for posting in postings:
                 job = self._parse_ashby_job(company_name, posting)
@@ -569,6 +601,113 @@ class CareerScraper:
             source="career_page",
             date_posted=job_data.get("releasedDate"),
         )
+
+    def _scrape_jibe(
+        self,
+        company_name: str,
+        api_url: Optional[str],
+        category: Optional[str],
+    ) -> ScrapeResult:
+        """Scrape a Jibe/iCIMS public jobs API with verified pagination."""
+        if not api_url:
+            return ScrapeResult(
+                status="parse_failure",
+                error=f"{company_name}: missing Jibe jobs API URL",
+            )
+
+        postings = []
+        page_number = 1
+        total = None
+        limit = 100
+        try:
+            while total is None or len(postings) < total:
+                params = {"limit": limit, "page": page_number}
+                if category:
+                    params["categories"] = category
+                response = self.session.get(api_url, params=params, timeout=30)
+                response.raise_for_status()
+                data = response.json()
+                page = data.get("jobs")
+                if not isinstance(page, list):
+                    raise ValueError("missing Jibe jobs")
+                page_total = data.get("totalCount")
+                if not isinstance(page_total, int):
+                    raise ValueError("missing Jibe totalCount")
+                if total is not None and page_total != total:
+                    raise ValueError("Jibe totalCount changed during pagination")
+                total = page_total
+                if not page and len(postings) < total:
+                    raise ValueError(
+                        f"pagination ended at {len(postings)}/{total} jobs"
+                    )
+                postings.extend(page)
+                page_number += 1
+        except requests.RequestException as e:
+            return ScrapeResult(
+                status="request_failure",
+                error=self._record_request_error(company_name, api_url, e),
+            )
+        except (TypeError, ValueError) as e:
+            return ScrapeResult(
+                status="parse_failure",
+                candidate_count=len(postings),
+                error=f"{company_name} ({api_url}): invalid Jibe response ({e})",
+            )
+
+        if len(postings) != total:
+            return ScrapeResult(
+                status="parse_failure",
+                candidate_count=len(postings),
+                error=(
+                    f"{company_name} ({api_url}): parsed "
+                    f"{len(postings)}/{total} advertised jobs"
+                ),
+            )
+
+        postings_by_url = {}
+        for wrapper in postings:
+            posting = wrapper.get("data") if isinstance(wrapper, dict) else None
+            if not isinstance(posting, dict):
+                return ScrapeResult(
+                    status="parse_failure",
+                    candidate_count=len(postings_by_url),
+                    error=f"{company_name} ({api_url}): malformed Jibe job record",
+                )
+            title = str(posting.get("title") or "").strip()
+            job_url = str(posting.get("apply_url") or "").strip()
+            if not title or not job_url:
+                return ScrapeResult(
+                    status="parse_failure",
+                    candidate_count=len(postings_by_url),
+                    error=f"{company_name} ({api_url}): Jibe job missing title or URL",
+                )
+            postings_by_url[job_url] = posting
+
+        if len(postings_by_url) != len(postings):
+            return ScrapeResult(
+                status="parse_failure",
+                candidate_count=len(postings_by_url),
+                error=f"{company_name} ({api_url}): duplicate Jibe pagination records",
+            )
+
+        jobs = []
+        for job_url, posting in postings_by_url.items():
+            title = str(posting["title"]).strip()
+            job = Job(
+                company=company_name,
+                title=title,
+                url=job_url,
+                location=str(
+                    posting.get("location_name")
+                    or posting.get("full_location")
+                    or ""
+                ),
+                source="career_page",
+                date_posted=posting.get("posted_date"),
+            )
+            if self._matches_criteria(job):
+                jobs.append(job)
+        return self._success_result(jobs, len(postings_by_url))
 
     def _scrape_eightfold(
         self,
@@ -962,8 +1101,6 @@ class CareerScraper:
             variables = {
                 "isLoggedIn": False,
                 "search_input": {
-                    "teams": [grad_team],
-                    "roles": ["full-time"],
                     "results_per_page": None,
                 },
                 "viewasUserID": None,
@@ -1008,6 +1145,14 @@ class CareerScraper:
             )
 
         postings = result["all_jobs"]
+        if not postings:
+            return ScrapeResult(
+                status="parse_failure",
+                error=(
+                    f"{company_name} ({api_url}): broad careers query "
+                    "returned no jobs"
+                ),
+            )
         jobs = []
         for posting in postings:
             posting_id = posting.get("id")
@@ -1089,15 +1234,23 @@ class CareerScraper:
                 error=f"{company_name} ({api_url}): invalid job response ({e})",
             )
 
-        if total is not None and len(postings_by_id) < total:
+        # Oracle's advertised total counts result rows, which can contain the
+        # same requisition ID more than once (for example, location variants).
+        # Validate that every row was paged through, then deduplicate alerts by
+        # requisition ID.
+        if total is not None and offset < total:
             return ScrapeResult(
                 status="parse_failure",
                 candidate_count=len(postings_by_id),
                 error=(
                     f"{company_name} ({api_url}): parsed "
-                    f"{len(postings_by_id)}/{total} advertised jobs"
+                    f"{offset}/{total} advertised rows"
                 ),
             )
+
+        site_root = url.rstrip("/")
+        if site_root.endswith("/jobs"):
+            site_root = site_root[:-len("/jobs")]
 
         jobs = []
         for posting_id, posting in postings_by_id.items():
@@ -1107,7 +1260,7 @@ class CareerScraper:
             job = Job(
                 company=company_name,
                 title=title,
-                url=f"{url.rstrip('/')}/job/{posting_id}",
+                url=f"{site_root}/job/{posting_id}",
                 location=str(posting.get("PrimaryLocation") or ""),
                 source="career_page",
                 date_posted=posting.get("PostedDate"),
@@ -1323,6 +1476,259 @@ class CareerScraper:
             if self._matches_criteria(job, explicit_entry_level=True):
                 jobs.append(job)
         return self._success_result(jobs, len(unique_open_ids))
+
+    def _scrape_two_sigma(self, company_name: str, url: str) -> ScrapeResult:
+        """Scrape Two Sigma's complete first-party paginated job portal."""
+        postings_by_url: dict[str, tuple[Job, bool]] = {}
+        offset = 0
+        page_size = 10
+        visited_offsets = set()
+        try:
+            while offset not in visited_offsets:
+                visited_offsets.add(offset)
+                response = self.session.get(
+                    url,
+                    params={
+                        "jobRecordsPerPage": page_size,
+                        "jobOffset": offset,
+                    },
+                    timeout=30,
+                )
+                response.raise_for_status()
+                soup = BeautifulSoup(response.text, "html.parser")
+                cards = soup.select("article.article--result")
+                if not cards and offset == 0:
+                    raise ValueError("no Two Sigma job records found")
+
+                page_urls = set()
+                for card in cards:
+                    link = card.select_one(
+                        "h3.article__header__text__title a[href*='/careers/JobDetail/']"
+                    )
+                    if not link:
+                        raise ValueError("Two Sigma job is missing its detail link")
+                    title = link.get_text(" ", strip=True)
+                    job_url = self._normalize_url(link.get("href", ""), url)
+                    location_node = card.select_one(
+                        ".article__header__content__text > span"
+                    )
+                    if not title or not job_url:
+                        raise ValueError("Two Sigma job is missing its title or URL")
+                    if job_url in page_urls or job_url in postings_by_url:
+                        raise ValueError("duplicate Two Sigma pagination record")
+                    page_urls.add(job_url)
+                    card_text = card.get_text(" ", strip=True).casefold()
+                    postings_by_url[job_url] = (
+                        Job(
+                            company=company_name,
+                            title=title,
+                            url=job_url,
+                            location=(
+                                location_node.get_text(" ", strip=True)
+                                if location_node
+                                else ""
+                            ),
+                            source="career_page",
+                        ),
+                        "early careers" in card_text,
+                    )
+
+                next_link = next(
+                    (
+                        link for link in soup.find_all("a", href=True)
+                        if link.get_text(" ", strip=True).casefold().startswith("next")
+                    ),
+                    None,
+                )
+                if not next_link:
+                    break
+                from urllib.parse import parse_qs, urlparse
+                next_values = parse_qs(urlparse(next_link["href"]).query).get(
+                    "jobOffset"
+                )
+                if not next_values:
+                    raise ValueError("Two Sigma next page is missing jobOffset")
+                offset = int(next_values[0])
+            else:
+                raise ValueError("Two Sigma pagination loop detected")
+        except requests.RequestException as e:
+            return ScrapeResult(
+                status="request_failure",
+                error=self._record_request_error(company_name, url, e),
+            )
+        except (TypeError, ValueError) as e:
+            return ScrapeResult(
+                status="parse_failure",
+                candidate_count=len(postings_by_url),
+                error=f"{company_name} ({url}): invalid jobs response ({e})",
+            )
+
+        jobs = [
+            job
+            for job, is_early_career in postings_by_url.values()
+            if self._matches_criteria(
+                job,
+                explicit_entry_level=is_early_career,
+            )
+        ]
+        return self._success_result(jobs, len(postings_by_url))
+
+    def _scrape_de_shaw(self, company_name: str, url: str) -> ScrapeResult:
+        """Scrape D. E. Shaw's complete public jobs embedded in Next.js data."""
+        try:
+            response = self.session.get(url, timeout=30)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.text, "html.parser")
+            data_node = soup.select_one("#__NEXT_DATA__")
+            if not data_node or not data_node.string:
+                raise ValueError("missing __NEXT_DATA__")
+            page_props = json.loads(data_node.string)["props"]["pageProps"]
+            if page_props.get("jobsFetchingError") is not False:
+                raise ValueError("embedded jobs fetch failed")
+            regular_jobs = page_props.get("regularJobs")
+            internships = page_props.get("internships")
+            if not isinstance(regular_jobs, list) or not isinstance(internships, list):
+                raise ValueError("missing public job collections")
+            public_postings = regular_jobs + internships
+        except requests.RequestException as e:
+            return ScrapeResult(
+                status="request_failure",
+                error=self._record_request_error(company_name, url, e),
+            )
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as e:
+            return ScrapeResult(
+                status="parse_failure",
+                error=f"{company_name} ({url}): invalid embedded jobs data ({e})",
+            )
+
+        postings_by_id = {}
+        for wrapper in public_postings:
+            posting = wrapper.get("data") if isinstance(wrapper, dict) else None
+            if not isinstance(posting, dict) or posting.get("id") is None:
+                return ScrapeResult(
+                    status="parse_failure",
+                    candidate_count=len(postings_by_id),
+                    error=f"{company_name} ({url}): malformed public job record",
+                )
+            postings_by_id[str(posting["id"])] = posting
+
+        if len(postings_by_id) != len(public_postings) or not postings_by_id:
+            return ScrapeResult(
+                status="parse_failure",
+                candidate_count=len(postings_by_id),
+                error=f"{company_name} ({url}): duplicate or empty public job data",
+            )
+
+        jobs = []
+        for posting in postings_by_id.values():
+            title = str(posting.get("displayName") or "").strip()
+            job_path = str(posting.get("jobUrl") or "").strip()
+            metadata = posting.get("jobMetadata") or {}
+            locations = metadata.get("jobLocations") or []
+            location = "; ".join(
+                str(item.get("name"))
+                for item in locations
+                if isinstance(item, dict) and item.get("name")
+            )
+            if not title or not job_path:
+                return ScrapeResult(
+                    status="parse_failure",
+                    candidate_count=len(postings_by_id),
+                    error=f"{company_name} ({url}): public job missing title or URL",
+                )
+            job = Job(
+                company=company_name,
+                title=title,
+                url=self._normalize_url(f"careers/{job_path}", url),
+                location=location,
+                source="career_page",
+                date_posted=posting.get("validFromDate"),
+            )
+            seeker_categories = {
+                str(value).casefold()
+                for value in (metadata.get("jobSeekerCategories") or [])
+            }
+            explicit_entry_level = bool(
+                metadata.get("forRecentGraduates")
+                or "student" in seeker_categories
+            )
+            if self._matches_criteria(
+                job,
+                explicit_entry_level=explicit_entry_level,
+            ):
+                jobs.append(job)
+        return self._success_result(jobs, len(postings_by_id))
+
+    def _scrape_etsy(self, company_name: str, url: str) -> ScrapeResult:
+        """Scrape Etsy's complete first-party Clinch jobs search."""
+        postings_by_url = {}
+        page_number = 1
+        total_pages = None
+        try:
+            while total_pages is None or page_number <= total_pages:
+                response = self.session.get(
+                    url,
+                    params={"page": page_number},
+                    timeout=30,
+                )
+                response.raise_for_status()
+                soup = BeautifulSoup(response.text, "html.parser")
+                cards = soup.select("article.job-search-results-card-col")
+                if not cards:
+                    raise ValueError(f"no Etsy records on page {page_number}")
+
+                page_urls = set()
+                for card in cards:
+                    link = card.select_one("h3.job-search-results-card-title a[href]")
+                    if not link:
+                        raise ValueError("Etsy job is missing its detail link")
+                    title = link.get_text(" ", strip=True)
+                    job_url = self._normalize_url(link.get("href", ""), url)
+                    location_node = card.select_one(".job-component-location")
+                    workplace_node = card.select_one(".job-component-workplace-type")
+                    location_parts = []
+                    for node in (workplace_node, location_node):
+                        value = node.get_text(" ", strip=True) if node else ""
+                        if value and value not in location_parts:
+                            location_parts.append(value)
+                    if not title or not job_url:
+                        raise ValueError("Etsy job is missing its title or URL")
+                    if job_url in page_urls or job_url in postings_by_url:
+                        raise ValueError("duplicate Etsy pagination record")
+                    page_urls.add(job_url)
+                    postings_by_url[job_url] = Job(
+                        company=company_name,
+                        title=title,
+                        url=job_url,
+                        location="; ".join(location_parts),
+                        source="career_page",
+                    )
+
+                if total_pages is None:
+                    from urllib.parse import parse_qs, urlparse
+                    page_values = [page_number]
+                    for link in soup.find_all("a", href=True):
+                        values = parse_qs(urlparse(link["href"]).query).get("page")
+                        if values and values[0].isdigit():
+                            page_values.append(int(values[0]))
+                    total_pages = max(page_values)
+                page_number += 1
+        except requests.RequestException as e:
+            return ScrapeResult(
+                status="request_failure",
+                error=self._record_request_error(company_name, url, e),
+            )
+        except (TypeError, ValueError) as e:
+            return ScrapeResult(
+                status="parse_failure",
+                candidate_count=len(postings_by_url),
+                error=f"{company_name} ({url}): invalid jobs response ({e})",
+            )
+
+        jobs = [
+            job for job in postings_by_url.values() if self._matches_criteria(job)
+        ]
+        return self._success_result(jobs, len(postings_by_url))
 
     def _scrape_rippling(
         self,
@@ -2207,8 +2613,8 @@ class CareerScraper:
 
     def _scrape_workday(self, company_name: str, url: str) -> ScrapeResult:
         """Scrape jobs from Workday-powered career pages (CXS API)."""
-        jobs = []
-        candidate_count = 0
+        postings_by_url = {}
+        records_seen = 0
 
         tenant_site = self._extract_workday_tenant_site(url)
         if not tenant_site:
@@ -2219,11 +2625,7 @@ class CareerScraper:
 
         tenant, site, base = tenant_site
         api_url = f"{base}/wday/cxs/{tenant}/{site}/jobs"
-        detail_base = (
-            url.rstrip("/")
-            if ".myworkdaysite.com" in url.lower()
-            else base
-        )
+        detail_base = url.split("?", 1)[0].rstrip("/") + "/"
 
         # Most tenants accept 100, which avoids dozens of requests. A few
         # enforce a smaller page size, so retry the first page at 20 on 400.
@@ -2267,23 +2669,71 @@ class CareerScraper:
                 )
 
             postings = data.get("jobPostings") or data.get("jobPostingsV2") or []
+            page_total = data.get("total")
+            if not isinstance(page_total, int):
+                return ScrapeResult(
+                    status="parse_failure",
+                    candidate_count=len(postings_by_url),
+                    error=f"{company_name} ({api_url}): missing Workday total",
+                )
+            # Some Workday tenants report the total only on the first page and
+            # return zero afterward. Keep the established total in that case,
+            # but honor later positive changes while the feed is being scanned.
+            if total is None or page_total > 0:
+                total = page_total
             if not postings:
+                if records_seen < total:
+                    return ScrapeResult(
+                        status="parse_failure",
+                        candidate_count=len(postings_by_url),
+                        error=(
+                            f"{company_name} ({api_url}): Workday pagination "
+                            f"ended at {records_seen}/{total} jobs"
+                        ),
+                    )
                 break
 
-            candidate_count += len(postings)
             for posting in postings:
-                job = self._parse_workday_job(company_name, posting, detail_base)
-                if job and self._matches_criteria(job):
-                    jobs.append(job)
-
-            if total is None:
-                total = data.get("total", None)
+                posting_url = (
+                    posting.get("externalPath")
+                    or posting.get("externalUrl")
+                    or ""
+                )
+                if not posting_url:
+                    return ScrapeResult(
+                        status="parse_failure",
+                        candidate_count=len(postings_by_url),
+                        error=f"{company_name} ({api_url}): Workday job missing URL",
+                    )
+                postings_by_url[str(posting_url)] = posting
 
             offset += len(postings)
-            if total is not None and offset >= total:
+            records_seen += len(postings)
+            if records_seen >= total:
                 break
 
-        return self._success_result(jobs, candidate_count)
+        if len(postings_by_url) != total:
+            return ScrapeResult(
+                status="parse_failure",
+                candidate_count=len(postings_by_url),
+                error=(
+                    f"{company_name} ({api_url}): parsed "
+                    f"{len(postings_by_url)}/{total} unique Workday jobs"
+                ),
+            )
+
+        jobs = []
+        for posting in postings_by_url.values():
+            job = self._parse_workday_job(company_name, posting, detail_base)
+            if not job:
+                return ScrapeResult(
+                    status="parse_failure",
+                    candidate_count=len(postings_by_url),
+                    error=f"{company_name} ({api_url}): malformed Workday job record",
+                )
+            if self._matches_criteria(job):
+                jobs.append(job)
+        return self._success_result(jobs, len(postings_by_url))
 
     def _extract_workday_tenant_site(self, url: str) -> Optional[tuple[str, str, str]]:
         """Extract Workday tenant and site from a Workday jobs URL."""
@@ -2325,7 +2775,10 @@ class CareerScraper:
             return None
 
         from urllib.parse import urljoin
-        url = urljoin(base_url, url_path)
+        if url_path.startswith(("https://", "http://")):
+            url = url_path
+        else:
+            url = urljoin(base_url, url_path.lstrip("/"))
 
         return Job(
             company=company_name,

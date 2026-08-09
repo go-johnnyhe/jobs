@@ -120,6 +120,23 @@ class TestHasExcludedTitle:
     def test_security_engineer(self):
         assert has_excluded_title("security engineer") is True
 
+    @pytest.mark.parametrize(
+        "title",
+        [
+            "ASIC Design Engineer - New College Grad",
+            "Formal Verification Engineer - New College Grad",
+            "Software Development Engineer - Embedded Systems",
+            "Embedded Software Engineer I",
+            "Software Engineer I, Mobile",
+            "Hardware Software Engineer I",
+            "Cloud Solution Engineer 1",
+            "Technical Product Marketing Engineer - New College Grad",
+            "Android Mobile Software Developer I",
+        ],
+    )
+    def test_non_software_new_grad_engineering_roles(self, title):
+        assert has_excluded_title(title) is True
+
 
 # --- has_blocked_location ---
 
