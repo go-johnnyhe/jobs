@@ -161,27 +161,6 @@ class GitHubTracker:
         except (IndexError, ValueError):
             return None
 
-    def _extract_text(self, text: str) -> str:
-        """Extract plain text from markdown, removing links and formatting."""
-        # Remove markdown links [text](url) -> text
-        text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
-        # Remove bold/italic
-        text = re.sub(r"\*+([^*]+)\*+", r"\1", text)
-        # Remove images
-        text = re.sub(r"!\[[^\]]*\]\([^)]+\)", "", text)
-        return text.strip()
-
-    def _extract_url(self, text: str) -> str:
-        """Extract URL from markdown link."""
-        match = re.search(r"\[([^\]]+)\]\(([^)]+)\)", text)
-        if match:
-            return match.group(2)
-        # Check for plain URL
-        match = re.search(r"https?://[^\s<>\"]+", text)
-        if match:
-            return match.group(0)
-        return ""
-
     def _matches_criteria(self, job: Job) -> bool:
         """Check if a job matches our filtering criteria."""
         # Check if company is in our target list

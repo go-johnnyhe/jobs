@@ -177,20 +177,6 @@ class DiscordNotifier:
             dry_run=dry_run,
         )
 
-    def notify_company_recovery(
-        self,
-        company: str,
-        recovered_after: int,
-        dry_run: bool = False,
-    ) -> bool:
-        """Send an alert when a priority company scrape recovers."""
-        return self._send_recovery_alert(
-            subject_type="Company",
-            name=company,
-            recovered_after=recovered_after,
-            dry_run=dry_run,
-        )
-
     def _send_health_alert(
         self,
         *,

@@ -1057,6 +1057,7 @@ def test_google_adapter_paginates_and_keeps_only_explicit_new_grad(monkeypatch):
                 <h3 class="QJPWVe">{title}</h3>
                 <div class="wVoYLb"><span class="pwO9Dc">
                   <span class="r0wTof">Seattle, WA, USA</span>
+                  <span class="r0wTof">; Cambridge, MA, USA</span>
                 </span></div>
                 <a href="jobs/results/{page}-role"></a>
               </li>
@@ -1087,7 +1088,24 @@ def test_google_adapter_paginates_and_keeps_only_explicit_new_grad(monkeypatch):
     assert [job.title for job in result.jobs] == [
         "Software Engineer, Early Career, 2027 Start"
     ]
+    assert result.jobs[0].location == "Seattle, WA, USA; Cambridge, MA, USA"
     assert result.jobs[0].url.endswith("/jobs/results/1-role")
+
+
+def test_google_early_career_role_with_multiple_us_locations_matches():
+    scraper = cs.CareerScraper()
+    job = Job(
+        company="Google",
+        title="Software Engineer, Early Career, Campus",
+        url=(
+            "https://www.google.com/about/careers/applications/jobs/results/"
+            "78703249065943750-software-engineer-early-career-campus"
+        ),
+        location="Mountain View, CA, USA; Cambridge, MA, USA",
+        source="career_page",
+    )
+
+    assert scraper._matches_criteria(job) is True
 
 
 def test_structured_html_adapter_checks_advertised_total(monkeypatch):

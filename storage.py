@@ -193,15 +193,6 @@ class JobStorage:
                 "by_company": by_company,
             }
 
-    def clear_old_jobs(self, days: int = 30):
-        """Remove jobs older than specified days."""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("""
-                DELETE FROM seen_jobs
-                WHERE first_seen < datetime('now', ? || ' days')
-            """, (f"-{days}",))
-            conn.commit()
-
     def record_source_failure(
         self,
         source: str,

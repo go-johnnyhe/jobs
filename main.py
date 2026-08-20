@@ -84,20 +84,10 @@ def _update_company_health(
                 company_name,
                 alert_thresholds=COMPANY_FAILURE_ALERT_THRESHOLDS,
             )
-            if (
-                recovered_after
-                and notify
-                and ENABLE_COMPANY_HEALTH_ALERTS
-                and company_name in PRIORITY_COMPANIES
-            ):
-                print(f"Company recovered: {company_name} (after {recovered_after} failed runs)")
-                sent = notifier.notify_company_recovery(
-                    company_name,
-                    recovered_after,
-                    dry_run=dry_run,
-                )
-                if sent and not dry_run:
-                    storage.confirm_company_recovery_alert(company_name)
+            # Company health is diagnostic data. Do not send recovery messages
+            # for individual companies because they create Discord noise.
+            if recovered_after:
+                storage.confirm_company_recovery_alert(company_name)
         else:
             failures, alert_threshold = storage.record_company_failure(
                 company_name,

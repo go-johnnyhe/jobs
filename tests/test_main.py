@@ -66,10 +66,6 @@ class FakeCompanyNotifier:
         self.company_failures.append((company, failures, error, dry_run))
         return True
 
-    def notify_company_recovery(self, company, recovered_after, dry_run):
-        return True
-
-
 def test_pending_backlog_is_sent_even_without_new_jobs():
     storage = FakeStorage([_make_pending_job(1), _make_pending_job(2)])
     notifier = FakeNotifier([True])
@@ -220,3 +216,31 @@ def test_company_alerts_can_be_enabled(monkeypatch, tmp_path):
     assert notifier.company_failures == [
         ("Meta", 3, "Meta: no candidate job links found", False)
     ]
+
+
+def test_company_recovery_alerts_are_never_sent(monkeypatch, tmp_path):
+    storage = JobStorage(db_path=str(tmp_path / "test.db"))
+    notifier = FakeCompanyNotifier()
+    failure = ScrapeResult(status="parse_failure", error="temporary failure")
+    success = ScrapeResult(status="empty")
+    monkeypatch.setattr(main, "ENABLE_COMPANY_HEALTH_ALERTS", True)
+
+    for _ in range(3):
+        main._update_company_health(
+            storage,
+            notifier,
+            {"NVIDIA": failure},
+            notify=True,
+            dry_run=False,
+        )
+
+    main._update_company_health(
+        storage,
+        notifier,
+        {"NVIDIA": success},
+        notify=True,
+        dry_run=False,
+    )
+
+    assert not hasattr(notifier, "notify_company_recovery")
+    assert storage.record_company_success("NVIDIA", [3]) == 0

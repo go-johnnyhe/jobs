@@ -2141,7 +2141,7 @@ class CareerScraper:
                         continue
                     locations = []
                     for node in card.select(".wVoYLb span.r0wTof"):
-                        location = node.get_text(" ", strip=True)
+                        location = node.get_text(" ", strip=True).strip(" ;")
                         if location and location not in locations:
                             locations.append(location)
                     job = Job(

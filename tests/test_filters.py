@@ -166,6 +166,15 @@ class TestHasBlockedLocation:
     def test_remote_united_states_allowed(self):
         assert has_blocked_location("Remote, United States") is False
 
+    def test_ambiguous_us_city_allowed_with_country(self):
+        assert has_blocked_location("Cambridge, MA, USA") is False
+
+    def test_ambiguous_foreign_city_still_blocked(self):
+        assert has_blocked_location("Cambridge, UK") is True
+
+    def test_us_prefixed_ambiguous_city_allowed(self):
+        assert has_blocked_location("US-CA-Dublin") is False
+
 
 # --- matches_job_criteria (end-to-end) ---
 
@@ -184,6 +193,20 @@ class TestMatchesJobCriteria:
 
     def test_blocked_location_rejected(self):
         job = _make_job(title="Software Engineer", location="London, UK")
+        assert matches_job_criteria(job) is False
+
+    def test_multi_location_passes_when_one_us_location_is_valid(self):
+        job = _make_job(
+            title="Software Engineer, Early Career",
+            location="London, UK; New York, NY, USA",
+        )
+        assert matches_job_criteria(job) is True
+
+    def test_multi_location_rejects_foreign_only_locations(self):
+        job = _make_job(
+            title="Software Engineer, Early Career",
+            location="London, UK; Dublin, Ireland",
+        )
         assert matches_job_criteria(job) is False
 
     def test_non_preferred_location_rejected(self):

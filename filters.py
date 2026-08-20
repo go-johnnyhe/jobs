@@ -135,37 +135,31 @@ def has_blocked_location(location: str) -> bool:
 
     location_lower = location.lower()
 
+    # An explicit US country marker takes priority over an ambiguous city name.
+    # This keeps places such as Cambridge, MA, USA and US-CA-Dublin from being
+    # mistaken for Cambridge, UK or Dublin, Ireland.
+    us_patterns = [
+        r'\bus\b',
+        r'\bu\.s\.',
+        r'\bunited states\b',
+        r'\busa\b',
+        r'\bu\.s\.a\.',
+        r'\bamerica\b',
+    ]
+    if any(re.search(pattern, location_lower) for pattern in us_patterns):
+        return False
+
     # Special handling for Remote
     if "remote" in location_lower:
-        # Check if it explicitly mentions US
-        us_patterns = [
-            r'\bus\b',
-            r'\bu\.s\.',
-            r'\bunited states\b',
-            r'\busa\b',
-            r'\bu\.s\.a\.',
-            r'\bamerica\b',
-        ]
-        has_us_qualifier = any(re.search(pattern, location_lower) for pattern in us_patterns)
-
-        # If it's just "Remote" without US qualifier, block it
-        # But allow if it has US qualifier
-        if not has_us_qualifier:
-            # Check if location is just "Remote" or "Remote" with non-US location
-            # If it contains a blocked location, block it
-            for blocked in BLOCKED_LOCATIONS:
-                pattern = r'\b' + re.escape(blocked.lower()) + r'\b'
-                if re.search(pattern, location_lower):
-                    return True
-            # Pure "Remote" without any country qualifier should be blocked
-            # Check if there's any country/city indicator beyond just "remote"
-            stripped = location_lower.replace("remote", "").strip(" -,/")
-            if not stripped:
-                # Just "Remote" with no qualifier - block it
+        # Check if it contains a blocked non-US location.
+        for blocked in BLOCKED_LOCATIONS:
+            pattern = r'\b' + re.escape(blocked.lower()) + r'\b'
+            if re.search(pattern, location_lower):
                 return True
-        else:
-            # Has US qualifier, so allow it
-            return False
+        # Pure "Remote" without a country qualifier is not eligible.
+        stripped = location_lower.replace("remote", "").strip(" -,/")
+        if not stripped:
+            return True
 
     # Check against blocked locations with word boundaries
     for blocked in BLOCKED_LOCATIONS:
@@ -235,13 +229,18 @@ def matches_job_criteria(
         if not has_level_one:
             return False
 
-    # 3. Check blocked locations (must happen before preferred locations check)
-    if has_blocked_location(job.location):
-        return False
-
-    # 4. Location check with word boundaries
+    # 3-4. Check each listed location separately. A multi-location posting is
+    # eligible when at least one location is allowed and preferred.
     if job.location:
-        if not matches_location(job.location):
+        location_options = [
+            option.strip()
+            for option in job.location.split(";")
+            if option.strip()
+        ]
+        if not any(
+            not has_blocked_location(option) and matches_location(option)
+            for option in location_options
+        ):
             return False
     else:
         # Empty location handling
