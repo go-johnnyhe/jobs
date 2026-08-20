@@ -2712,13 +2712,17 @@ class CareerScraper:
             if records_seen >= total:
                 break
 
-        if len(postings_by_url) != total:
+        # Large Workday feeds can repeat a small number of rows while offset
+        # pagination is in progress. Keep deduplicating by URL, but fail when
+        # the unique coverage is low enough to indicate broken pagination.
+        unique_count = len(postings_by_url)
+        if total and unique_count * 100 < total * 98:
             return ScrapeResult(
                 status="parse_failure",
-                candidate_count=len(postings_by_url),
+                candidate_count=unique_count,
                 error=(
                     f"{company_name} ({api_url}): parsed "
-                    f"{len(postings_by_url)}/{total} unique Workday jobs"
+                    f"{unique_count}/{total} unique Workday jobs"
                 ),
             )
 
@@ -2733,7 +2737,7 @@ class CareerScraper:
                 )
             if self._matches_criteria(job):
                 jobs.append(job)
-        return self._success_result(jobs, len(postings_by_url))
+        return self._success_result(jobs, unique_count)
 
     def _extract_workday_tenant_site(self, url: str) -> Optional[tuple[str, str, str]]:
         """Extract Workday tenant and site from a Workday jobs URL."""

@@ -1653,6 +1653,44 @@ def test_workday_keeps_first_page_total_when_later_pages_report_zero(monkeypatch
     assert result.candidate_count == 2
 
 
+def test_workday_allows_a_small_number_of_duplicate_rows(monkeypatch):
+    scraper = cs.CareerScraper()
+    postings = [
+        {
+            "title": f"Software Engineer {number}",
+            "externalPath": f"/job/{number}",
+            "locationsText": "Seattle, WA",
+        }
+        for number in range(99)
+    ]
+    postings.append(postings[0].copy())
+
+    class Response:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"total": 100, "jobPostings": postings}
+
+    monkeypatch.setattr(
+        scraper.session,
+        "post",
+        lambda *_args, **_kwargs: Response(),
+    )
+    result = scraper._scrape_company(
+        "NVIDIA",
+        {
+            "ats": "workday",
+            "url": "https://nvidia.wd5.myworkdayjobs.com/NVIDIAExternalCareerSite",
+        },
+    )
+
+    assert result.healthy is True
+    assert result.candidate_count == 99
+
+
 def test_workday_detail_urls_keep_candidate_site_path():
     scraper = cs.CareerScraper()
     posting = {

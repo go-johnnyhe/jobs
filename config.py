@@ -716,9 +716,9 @@ SOURCE_FAILURE_ALERT_THRESHOLDS = [3, 6, 12]
 # Company-level alerts should fire once per failure streak, then recover.
 COMPANY_FAILURE_ALERT_THRESHOLDS = [3]
 
-# Alert only after repeated failures at the high-value sources above. A broken
-# direct feed can otherwise silently miss a short-lived new-grad posting.
-ENABLE_COMPANY_HEALTH_ALERTS = True
+# Keep company failures in logs and statistics. Do not send them to Discord;
+# Discord is reserved for job notifications and source-wide outages.
+ENABLE_COMPANY_HEALTH_ALERTS = False
 
 # Career source is considered healthy only if enough company scrapes succeed.
 CAREERS_MIN_HEALTHY_SUCCESS_RATE = 0.25
