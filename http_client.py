@@ -19,8 +19,8 @@ def create_session(
         status_forcelist: HTTP status codes that trigger a retry.
             Pass an empty tuple to disable status-code retries.
         allowed_methods: HTTP methods eligible for retry.
-            Pass ("GET",) to prevent retrying POST on connection/timeout
-            failures (avoids duplicating non-idempotent requests).
+            This does not restrict connection retries. Set retries=0 for
+            non-idempotent requests such as Discord webhooks.
     """
     session = requests.Session()
     retry = Retry(

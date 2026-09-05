@@ -2,7 +2,7 @@
 
 import main
 
-from models import ScrapeResult
+from models import Job, ScrapeResult
 from storage import JobStorage
 
 
@@ -25,8 +25,8 @@ class FakeStorage:
     def get_unnotified(self):
         return list(self.pending_jobs)
 
-    def mark_notified(self, job):
-        self.marked.append(job["unique_id"])
+    def mark_notified(self, jobs):
+        self.marked.extend(job["unique_id"] for job in jobs)
 
 
 class FakeNotifier:
@@ -65,6 +65,51 @@ class FakeCompanyNotifier:
     def notify_company_failure(self, company, failures, error, dry_run):
         self.company_failures.append((company, failures, error, dry_run))
         return True
+
+
+def test_scan_deduplication_prefers_direct_career_record():
+    repository_job = Job(
+        "🔥 Stripe",
+        "Software Engineer New Grad",
+        "https://stripe.com/jobs/search?gh_jid=8128744&utm_source=Simplify&ref=Simplify",
+        "Seattle, WA",
+        "SimplifyJobs/New-Grad-Positions",
+    )
+    career_job = Job(
+        "Stripe",
+        "Software Engineer, New Grad",
+        "https://stripe.com/jobs/search?gh_jid=8128744",
+        "San Francisco, Seattle, New York",
+        "career_page",
+    )
+
+    assert main._deduplicate_scan_jobs([repository_job, career_job]) == [career_job]
+
+
+def test_scan_deduplication_normalizes_lever_apply_suffix():
+    repository_job = Job(
+        "Palantir",
+        "Software Engineer, New Grad",
+        "https://jobs.lever.co/palantir/abc/apply?utm_source=Simplify",
+        "New York, NY",
+        "repository",
+    )
+    career_job = Job(
+        "Palantir",
+        "Software Engineer, New Grad",
+        "https://jobs.lever.co/palantir/abc",
+        "New York, NY",
+        "career_page",
+    )
+
+    assert main._deduplicate_scan_jobs([repository_job, career_job]) == [career_job]
+
+
+def test_scan_deduplication_keeps_distinct_apply_urls():
+    first = Job("Uber", "Software Engineer I", "https://example.com/1", "New York", "career_page")
+    second = Job("Uber", "Software Engineer I", "https://example.com/2", "Seattle", "career_page")
+
+    assert main._deduplicate_scan_jobs([first, second]) == [first, second]
 
 def test_pending_backlog_is_sent_even_without_new_jobs():
     storage = FakeStorage([_make_pending_job(1), _make_pending_job(2)])
@@ -244,3 +289,35 @@ def test_company_recovery_alerts_are_never_sent(monkeypatch, tmp_path):
 
     assert not hasattr(notifier, "notify_company_recovery")
     assert storage.record_company_success("NVIDIA", [3]) == 0
+
+
+def test_dry_run_keeps_all_pending_jobs():
+    storage = FakeStorage([_make_pending_job(i) for i in range(55)])
+    notifier = FakeNotifier([True] * 5)
+    assert main._send_pending_notifications(storage, notifier, dry_run=True)
+    assert storage.marked == []
+    assert all(call["dry_run"] for call in notifier.calls + notifier.summary_calls)
+
+
+def test_list_recent_zero_does_not_scrape(monkeypatch, tmp_path):
+    storage = JobStorage(str(tmp_path / "test.db"))
+    monkeypatch.setattr(main, "JobStorage", lambda: storage)
+    monkeypatch.setattr(main.sys, "argv", ["main.py", "--list-recent", "0"])
+    def unexpected_scrape():
+        raise AssertionError("list command must not scrape")
+    monkeypatch.setattr(main, "GitHubTracker", unexpected_scrape)
+    monkeypatch.setattr(main, "CareerScraper", unexpected_scrape)
+    main.main()
+
+
+def test_failed_batch_is_replayed_from_real_database(tmp_path):
+    from models import Job
+    storage = JobStorage(str(tmp_path / "test.db"))
+    jobs = [Job("Acme", "Software Engineer", f"https://example.com/{i}", "Seattle, WA", "test")
+            for i in range(15)]
+    storage.add_jobs(jobs)
+    assert not main._send_pending_notifications(storage, FakeNotifier([True, False]), dry_run=False)
+    assert [row["url"] for row in storage.get_unnotified()] == [job.url for job in jobs[10:]]
+    assert storage.add_jobs(jobs) == []
+    assert main._send_pending_notifications(storage, FakeNotifier([True]), dry_run=False)
+    assert storage.get_unnotified() == []

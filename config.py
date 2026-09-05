@@ -127,8 +127,8 @@ COMPANIES = {
     },
     "Temporal": {
         "url": "https://temporal.io/careers#open-positions",
-        "ats": "greenhouse",
-        "ats_id": "temporaltechnologies",
+        "ats": "ashby",
+        "ats_id": "temporal",
     },
     "Snowflake": {
         "url": "https://careers.snowflake.com/us/en/search-results?keywords=software%20engineer",
@@ -375,8 +375,9 @@ COMPANIES = {
         "ats": "workday",
     },
     "Twitter": {
-        "url": "https://x.com/careers",
-        "ats": "internal",
+        "url": "https://careers.smartrecruiters.com/X",
+        "ats": "smartrecruiters",
+        "ats_id": "X",
     },
     # Seattle Tech
     "Redfin": {
@@ -474,9 +475,9 @@ COMPANIES = {
         "ats": "internal",
     },
     "HRT": {
-        "url": "https://boards.greenhouse.io/hrttalentcommunity",
+        "url": "https://www.hudsonrivertrading.com/careers/",
         "ats": "greenhouse",
-        "ats_id": "hrttalentcommunity",
+        "ats_id": "wehrtyou",
     },
     "DE Shaw": {
         "url": "https://www.deshaw.com/careers",
@@ -779,17 +780,22 @@ TITLE_EXCLUSIONS = [
     "physical design",
     "power optimization",
     "rtl power",
+    "design verification",
     "verification engineer",
+    "energy modeling engineer",
     "cell modeling",
     "cell modelling",
     "electrical engineer",
     "mechanical engineer",
     "manufacturing engineer",
+    "module engineer",
     # Support/Operations (not development)
     "support engineer",
     "it engineer",
     "network engineer",
     "network operations",
+    "network production engineer",
+    "systems engineering rotation",
     "systems administrator",
     "helpdesk",
     # Other non-SWE
@@ -799,6 +805,8 @@ TITLE_EXCLUSIONS = [
     "integration engineer",
     "product marketing engineer",
     "technical product marketing",
+    "data scientist",
+    "quant research",
 ]
 
 # Blocked locations - explicitly reject jobs in these locations

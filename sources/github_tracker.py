@@ -1,13 +1,12 @@
 """GitHub repository tracker for job listings."""
 
-import re
 from typing import Optional
 
 import requests
 from bs4 import BeautifulSoup
 
-from config import GITHUB_REPOS, ROLE_KEYWORDS, TARGET_COMPANIES
-from filters import matches_job_criteria
+from config import GITHUB_REPOS, TARGET_COMPANIES
+from filters import has_role_keyword, matches_job_criteria
 from http_client import create_session
 from models import Job, ScrapeResult
 
@@ -25,11 +24,6 @@ class GitHubTracker:
             "Accept": "application/vnd.github.v3.raw",
             "User-Agent": "JobTracker/1.0",
         })
-
-    def fetch_jobs(self) -> list[Job]:
-        """Fetch all jobs from configured GitHub repositories."""
-        jobs, _, _ = self.fetch_jobs_with_status()
-        return jobs
 
     def fetch_jobs_with_status(self) -> tuple[list[Job], bool, str]:
         """Fetch jobs and return (jobs, healthy, error_summary)."""
@@ -88,16 +82,19 @@ class GitHubTracker:
         candidate_count = 0
         soup = BeautifulSoup(content, "html.parser")
 
-        # Find all table rows
-        for row in soup.find_all("tr"):
-            cells = row.find_all("td")
-            if len(cells) < 4:
-                continue
-
-            candidate_count += 1
-            job = self._parse_html_row(cells)
-            if job and self._matches_criteria(job):
-                jobs.append(job)
+        for table in soup.find_all("table"):
+            company = ""
+            for row in table.find_all("tr"):
+                cells = row.find_all("td")
+                if len(cells) < 4:
+                    continue
+                candidate_count += 1
+                company_text = cells[0].get_text(" ", strip=True)
+                if company_text not in {"", "↳", "↪"}:
+                    company = company_text
+                job = self._parse_html_row(cells, company=company, source=repo_name)
+                if job and self._matches_criteria(job):
+                    jobs.append(job)
 
         if candidate_count == 0:
             return ScrapeResult(
@@ -111,55 +108,27 @@ class GitHubTracker:
             status="success" if jobs else "empty",
         )
 
-    def _parse_html_row(self, cells) -> Optional[Job]:
-        """Parse an HTML table row into a Job object."""
-        try:
-            # Cell 0: Company (with link)
-            company_cell = cells[0]
-            company_link = company_cell.find("a")
-            company = company_link.get_text(strip=True) if company_link else company_cell.get_text(strip=True)
-
-            # Cell 1: Role/Title
-            title = cells[1].get_text(strip=True)
-
-            # Cell 2: Location
-            location = cells[2].get_text(strip=True) if len(cells) > 2 else ""
-
-            # Cell 3: Application link - find the first actual job link (not simplify.jobs)
-            url = ""
-            if len(cells) > 3:
-                for link in cells[3].find_all("a", href=True):
-                    href = link.get("href", "")
-                    # Skip simplify.jobs links, get the actual application link
-                    if href and "simplify.jobs" not in href:
-                        url = href
-                        break
-                # If only simplify link found, use it as fallback
-                if not url:
-                    first_link = cells[3].find("a", href=True)
-                    if first_link:
-                        url = first_link.get("href", "")
-
-            # Cell 4: Date/Age
-            date_posted = cells[4].get_text(strip=True) if len(cells) > 4 else ""
-
-            if not company or not url:
-                return None
-
-            # Skip closed positions (marked with 🔒)
-            if "🔒" in str(cells[3]):
-                return None
-
-            return Job(
-                company=company,
-                title=title,
-                url=url,
-                location=location,
-                source="SimplifyJobs/New-Grad-Positions",
-                date_posted=date_posted,
-            )
-        except (IndexError, ValueError):
+    def _parse_html_row(self, cells, *, company: str, source: str) -> Optional[Job]:
+        """Parse a complete row; the caller resolves repeated company cells."""
+        title = cells[1].get_text(" ", strip=True)
+        location = cells[2].get_text("; ", strip=True)
+        if not company or not title or "🔒" in cells[3].get_text():
             return None
+        links = [
+            link["href"] for link in cells[3].find_all("a", href=True)
+            if link["href"].startswith(("https://", "http://"))
+        ]
+        if not links:
+            return None
+        url = next((href for href in links if "simplify.jobs" not in href), links[0])
+        return Job(
+            company=company,
+            title=title,
+            url=url,
+            location=location,
+            source=source,
+            date_posted=cells[4].get_text(strip=True) if len(cells) > 4 else "",
+        )
 
     def _matches_criteria(self, job: Job) -> bool:
         """Check if a job matches our filtering criteria."""
@@ -175,12 +144,4 @@ class GitHubTracker:
         if not company_match:
             return False
 
-        title_lower = job.title.lower()
-        if not any(
-            re.search(r"(?<!\w)" + re.escape(keyword) + r"(?!\w)", title_lower)
-            for keyword in ROLE_KEYWORDS
-        ):
-            return False
-
-        # Use shared filter for seniority and location checks
-        return matches_job_criteria(job)
+        return has_role_keyword(job.title) and matches_job_criteria(job)

@@ -1,7 +1,10 @@
 """SQLite storage for tracking seen job listings."""
 
+from contextlib import closing
 import sqlite3
-from typing import Optional, Sequence
+from typing import Iterable, Optional, Sequence
+
+from models import Job
 
 from config import DATABASE_PATH, PRIORITY_COMPANIES, SOURCE_FAILURE_ALERT_THRESHOLDS
 
@@ -15,7 +18,7 @@ class JobStorage:
 
     def _init_db(self):
         """Initialize the database schema."""
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS seen_jobs (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -30,12 +33,10 @@ class JobStorage:
                     notified INTEGER DEFAULT 0
                 )
             """)
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_unique_id ON seen_jobs(unique_id)
-            """)
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_notified ON seen_jobs(notified)
-            """)
+            # UNIQUE already indexes unique_id; the composite notification
+            # index also supports queries on notified alone. Migrate old DBs.
+            conn.execute("DROP INDEX IF EXISTS idx_unique_id")
+            conn.execute("DROP INDEX IF EXISTS idx_notified")
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_company ON seen_jobs(company)
             """)
@@ -47,7 +48,6 @@ class JobStorage:
             """)
             self._ensure_health_table(conn, "source_health", "source")
             self._ensure_health_table(conn, "company_health", "company")
-            conn.commit()
 
     def _ensure_health_table(self, conn: sqlite3.Connection, table: str, key_column: str):
         """Create or migrate a health-tracking table."""
@@ -79,69 +79,58 @@ class JobStorage:
             raise ValueError("At least one positive alert threshold is required")
         return normalized
 
-    def is_new(self, job) -> bool:
-        """Check if a job has been seen before."""
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute(
-                "SELECT 1 FROM seen_jobs WHERE unique_id = ?",
-                (job.unique_id,)
-            )
-            return cursor.fetchone() is None
+    def add_jobs(self, jobs: Iterable[Job], notified: bool = False) -> list[Job]:
+        """Insert a scan in one transaction and return only newly stored jobs."""
+        new_jobs = []
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
+            for job in jobs:
+                cursor = conn.execute("""
+                    INSERT INTO seen_jobs
+                    (unique_id, company, title, url, location, source, date_posted, notified)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(unique_id) DO NOTHING
+                """, (
+                    job.unique_id, job.company, job.title, job.url,
+                    job.location, job.source, job.date_posted, int(notified),
+                ))
+                if cursor.rowcount:
+                    new_jobs.append(job)
+        return new_jobs
 
-    def mark_seen(self, job, notified: bool = False):
-        """Mark a job as seen in the database."""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("""
-                INSERT OR IGNORE INTO seen_jobs
-                (unique_id, company, title, url, location, source, date_posted, notified)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                job.unique_id,
-                job.company,
-                job.title,
-                job.url,
-                job.location,
-                job.source,
-                job.date_posted,
-                1 if notified else 0,
-            ))
-            conn.commit()
-
-    def mark_notified(self, job):
-        """Mark a job as having been notified."""
-        unique_id = job.unique_id if hasattr(job, "unique_id") else job["unique_id"]
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute(
+    def mark_notified(self, jobs: Iterable[Job | dict]):
+        """Persist one successfully sent batch in one transaction."""
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
+            conn.executemany(
                 "UPDATE seen_jobs SET notified = 1 WHERE unique_id = ?",
-                (unique_id,)
+                ((job.unique_id if isinstance(job, Job) else job["unique_id"],)
+                 for job in jobs),
             )
-            conn.commit()
 
     def get_unnotified(self) -> list[dict]:
         """Get all jobs that haven't been notified yet."""
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute("""
                 SELECT * FROM seen_jobs
                 WHERE notified = 0
-                ORDER BY first_seen ASC
+                ORDER BY first_seen ASC, id ASC
             """)
             return [dict(row) for row in cursor.fetchall()]
 
     def get_recent(self, limit: int = 50) -> list[dict]:
         """Get the most recently seen jobs."""
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute("""
                 SELECT * FROM seen_jobs
-                ORDER BY first_seen DESC
+                ORDER BY first_seen DESC, id DESC
                 LIMIT ?
             """, (limit,))
             return [dict(row) for row in cursor.fetchall()]
 
     def get_stats(self) -> dict:
         """Get statistics about stored jobs."""
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.row_factory = sqlite3.Row
             total = conn.execute("SELECT COUNT(*) FROM seen_jobs").fetchone()[0]
             notified = conn.execute(
@@ -153,7 +142,7 @@ class JobStorage:
                     CAST((julianday('now') - julianday(first_seen)) * 24 AS INTEGER) AS age_hours
                 FROM seen_jobs
                 WHERE notified = 0
-                ORDER BY first_seen ASC
+                ORDER BY first_seen ASC, id ASC
                 LIMIT 1
             """).fetchone()
 
@@ -304,7 +293,7 @@ class JobStorage:
         """Record a health failure for a source or company."""
         thresholds = self._normalize_thresholds(alert_thresholds)
 
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             row = conn.execute(
                 f"""
                 SELECT consecutive_failures, last_alert_failure_count
@@ -339,7 +328,6 @@ class JobStorage:
                 """,
                 (key_value, consecutive_failures, error, last_alert_failure_count),
             )
-            conn.commit()
 
         return consecutive_failures, alert_threshold
 
@@ -351,7 +339,7 @@ class JobStorage:
         alert_failure_count: int,
     ):
         """Persist that a failure alert was sent for a health record."""
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.execute(
                 f"""
                 UPDATE {table}
@@ -363,7 +351,6 @@ class JobStorage:
                 """,
                 (alert_failure_count, alert_failure_count, key_value),
             )
-            conn.commit()
 
     def _record_health_success(
         self,
@@ -376,7 +363,7 @@ class JobStorage:
         thresholds = self._normalize_thresholds(alert_thresholds)
         min_threshold = min(thresholds)
 
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             row = conn.execute(
                 f"""
                 SELECT consecutive_failures, last_alert_failure_count, pending_recovery_after
@@ -411,7 +398,6 @@ class JobStorage:
                 """,
                 (key_value, recovery_after),
             )
-            conn.commit()
 
         return recovery_after
 
@@ -422,7 +408,7 @@ class JobStorage:
         key_value: str,
     ):
         """Clear pending recovery alert state after successful notification."""
-        with sqlite3.connect(self.db_path) as conn:
+        with closing(sqlite3.connect(self.db_path)) as conn, conn:
             conn.execute(
                 f"""
                 UPDATE {table}
@@ -431,4 +417,3 @@ class JobStorage:
                 """,
                 (key_value,),
             )
-            conn.commit()

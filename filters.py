@@ -1,10 +1,11 @@
-"""Centralized filtering logic for job listings."""
+"""Shared title and location filters for job listings."""
 
 import re
 
 from config import (
     BLOCKED_LOCATIONS,
     PREFERRED_LOCATIONS,
+    ROLE_KEYWORDS,
     SENIORITY_EXCLUSIONS,
     SENIORITY_EXCLUSION_PATTERNS,
     TITLE_EXCLUSIONS,
@@ -12,173 +13,75 @@ from config import (
 )
 from models import Job
 
+# Compile configuration once, rather than rebuilding patterns for every job.
+_US_RE = re.compile(
+    r"\b(?:u\.?s\.?(?:a\.?)?|united states|america)\b", re.IGNORECASE,
+)
+_PREFERRED_RE = re.compile(
+    r"\b(?:" + "|".join(
+        r"u\.?s\.?(?:a\.?)?" if loc.lower() == "us" else re.escape(loc)
+        for loc in PREFERRED_LOCATIONS
+    ) + r")\b", re.IGNORECASE,
+)
+_BLOCKED_RE = re.compile(
+    r"\b(?:" + "|".join(map(re.escape, BLOCKED_LOCATIONS)) + r")\b",
+    re.IGNORECASE,
+)
+_ROLE_RE = re.compile(
+    r"(?<!\w)(?:" + "|".join(map(re.escape, ROLE_KEYWORDS)) + r")(?!\w)",
+    re.IGNORECASE,
+)
+_SENIOR_RE = re.compile(
+    r"(?<!\w)(?:" + "|".join(re.escape(kw.strip()) for kw in SENIORITY_EXCLUSIONS)
+    + r")(?!\w)|" + "|".join(SENIORITY_EXCLUSION_PATTERNS), re.IGNORECASE,
+)
+_EXCLUDED_TITLE_RE = re.compile(
+    r"(?<!\w)(?:" + "|".join(
+        r"intern(?:ship|ships|s)?" if kw == "intern" else re.escape(kw)
+        for kw in TITLE_EXCLUSIONS
+    ) + r"|android|ios|mobile|embedded|firmware|hardware|solutions?\s+engineer)(?!\w)",
+    re.IGNORECASE,
+)
+_NEW_GRAD_RE = re.compile(
+    r"(?<!\w)(?:" + "|".join(map(re.escape, TITLE_KEYWORDS)) + r")(?!\w)",
+    re.IGNORECASE,
+)
+
 
 def matches_location(location: str) -> bool:
-    """
-    Check if a location matches preferred locations using word boundaries.
+    """Accept unspecified locations or a configured preferred location."""
+    return not PREFERRED_LOCATIONS or not location or bool(_PREFERRED_RE.search(location))
 
-    Uses regex word boundaries to prevent partial matches like "campus" matching "us".
-    Handles "us" specially to match "U.S.", "US", "U.S.A.", etc.
 
-    Returns True if:
-    - No preferred locations configured (empty list)
-    - Location is empty/not specified
-    - Location matches any preferred location
-    """
-    if not PREFERRED_LOCATIONS:
-        return True
-
-    if not location:
-        return True
-
-    location_lower = location.lower()
-
-    for loc in PREFERRED_LOCATIONS:
-        loc_lower = loc.lower()
-
-        # Special handling for "us" to match word boundaries and variants like "U.S."
-        if loc_lower == "us":
-            # Match "us", "u.s.", "u.s.a.", etc. with word boundaries
-            pattern = r'\bu\.?s\.?(?:a\.?)?\b'
-        else:
-            # Standard word boundary matching
-            pattern = r'\b' + re.escape(loc_lower) + r'\b'
-
-        if re.search(pattern, location_lower):
-            return True
-
-    return False
+def has_role_keyword(title: str) -> bool:
+    """Require a complete role keyword, not a substring of another word."""
+    return bool(_ROLE_RE.search(title))
 
 
 def is_senior_level(title: str) -> bool:
-    """
-    Check if a job title indicates a senior/non-entry-level position.
-
-    Returns True if the title contains:
-    - Senior keywords (senior, staff, principal, etc.)
-    - Roman numerals II, III, IV, V (but NOT I)
-    - Numeric levels (SDE 2, Engineer 3, L4, L5, etc.)
-    - Experience requirements (2+ years, 3 years, etc.)
-
-    Does NOT exclude:
-    - I or 1 (entry-level indicators)
-    - Years like 2024, 2025, 2026 (graduation years)
-    - L3 (entry-level at Google)
-    """
-    title_lower = title.lower()
-
-    # Check for senior keywords
-    for keyword in SENIORITY_EXCLUSIONS:
-        if keyword in title_lower:
-            return True
-
-    # Check regex patterns for seniority indicators
-    for pattern in SENIORITY_EXCLUSION_PATTERNS:
-        if re.search(pattern, title_lower, re.IGNORECASE):
-            return True
-
-    return False
+    """Reject senior keywords, higher job levels, and experience requirements."""
+    return bool(_SENIOR_RE.search(title))
 
 
 def has_excluded_title(title: str) -> bool:
-    """
-    Check if a job title contains exclusion keywords indicating non-SWE roles.
-
-    Returns True for roles like:
-    - Sales/Solutions/Customer Engineer
-    - Android/iOS/Mobile Engineer
-    - QA/Test/SDET roles
-    - Hardware/Embedded/Firmware
-
-    Returns False for (intentionally allowed):
-    - Data/ML/AI Engineer
-    - DevOps/SRE/Platform Engineer
-    """
-    title_lower = title.lower()
-
-    # Domain words can appear before or after the software title, so phrase
-    # exclusions alone miss forms such as "Software Engineer I, Mobile".
-    if re.search(
-        r"\b(?:android|ios|mobile|embedded|firmware|hardware)\b",
-        title_lower,
-    ):
-        return True
-    if re.search(r"\bsolutions?\s+engineer\b", title_lower):
-        return True
-
-    for exclusion in TITLE_EXCLUSIONS:
-        if exclusion in title_lower:
-            return True
-
-    return False
+    """Reject internships and excluded engineering disciplines."""
+    return bool(_EXCLUDED_TITLE_RE.search(title))
 
 
 def has_blocked_location(location: str) -> bool:
-    """
-    Check if a location is in the blocklist (non-US locations).
-
-    Uses word boundary matching to prevent partial matches.
-
-    Returns True for:
-    - UK locations (London, Cambridge, etc.)
-    - Europe (Germany, France, Ireland, etc.)
-    - India (Bangalore, Hyderabad, etc.)
-    - APAC (Singapore, Japan, Australia)
-    - Canada (Toronto, Vancouver, Montreal)
-
-    Special handling for "Remote":
-    - "Remote" alone without US qualifier → blocked
-    - "Remote - US", "Remote, United States" → allowed
-    """
-    if not location:
+    """Reject blocked places and bare Remote; explicit US markers take priority."""
+    if not location or _US_RE.search(location):
         return False
-
-    location_lower = location.lower()
-
-    # An explicit US country marker takes priority over an ambiguous city name.
-    # This keeps places such as Cambridge, MA, USA and US-CA-Dublin from being
-    # mistaken for Cambridge, UK or Dublin, Ireland.
-    us_patterns = [
-        r'\bus\b',
-        r'\bu\.s\.',
-        r'\bunited states\b',
-        r'\busa\b',
-        r'\bu\.s\.a\.',
-        r'\bamerica\b',
-    ]
-    if any(re.search(pattern, location_lower) for pattern in us_patterns):
-        return False
-
-    # Special handling for Remote
-    if "remote" in location_lower:
-        # Check if it contains a blocked non-US location.
-        for blocked in BLOCKED_LOCATIONS:
-            pattern = r'\b' + re.escape(blocked.lower()) + r'\b'
-            if re.search(pattern, location_lower):
-                return True
-        # Pure "Remote" without a country qualifier is not eligible.
-        stripped = location_lower.replace("remote", "").strip(" -,/")
-        if not stripped:
-            return True
-
-    # Check against blocked locations with word boundaries
-    for blocked in BLOCKED_LOCATIONS:
-        pattern = r'\b' + re.escape(blocked.lower()) + r'\b'
-        if re.search(pattern, location_lower):
-            return True
-
-    return False
+    if BLOCKED_LOCATIONS and _BLOCKED_RE.search(location):
+        return True
+    return "remote" in location.lower() and not location.lower().replace(
+        "remote", ""
+    ).strip(" -,/")
 
 
 def has_new_grad_indicator(title: str) -> bool:
-    """
-    Check if a job title contains explicit new grad/entry-level keywords.
-
-    This helps identify jobs that are explicitly targeted at new grads,
-    which may have looser location requirements.
-    """
-    title_lower = title.lower()
-    return any(kw in title_lower for kw in TITLE_KEYWORDS)
+    """Check for an explicit new-graduate or entry-level title keyword."""
+    return bool(_NEW_GRAD_RE.search(title))
 
 
 def matches_job_criteria(
@@ -186,66 +89,22 @@ def matches_job_criteria(
     check_title_keywords: bool = False,
     require_location: bool = False,
 ) -> bool:
+    """Apply title exclusions, seniority, optional entry level, and location rules.
+
+    A multi-location posting is eligible if any semicolon-separated location
+    passes. Missing locations require a new-grad title when require_location
+    is set. Entry-level wording never overrides an explicit senior title.
     """
-    Unified job filtering that combines seniority, title exclusions, and location checks.
-
-    Args:
-        job: The job to check
-        check_title_keywords: If True, require title to have new grad keywords
-                            (used by career_scraper which scrapes all jobs)
-        require_location: If True, reject empty locations unless job has new grad keywords
-                         (used for generic-scraped jobs where location might be missing)
-
-    Returns:
-        True if the job passes all filters
-
-    Filtering rules:
-    1. Title must NOT contain excluded role keywords (fast fail)
-    2. Title must NOT indicate senior level (unless explicitly new grad + level 1)
-    3. Location must NOT be in blocked locations list
-    4. Location must match preferred locations (with word boundaries)
-       - Empty locations are only accepted if title has new grad indicator
-         OR if require_location is False
-    """
-    title_lower = job.title.lower()
-
-    # 1. Check title exclusions first (fast fail for non-SWE roles)
-    if has_excluded_title(title_lower):
+    if has_excluded_title(job.title) or is_senior_level(job.title):
         return False
-
-    # Check for explicit new grad indicator
-    is_new_grad = has_new_grad_indicator(title_lower)
-
-    # 2. Check seniority - always exclude senior roles unless explicitly new grad
-    if not is_new_grad and is_senior_level(title_lower):
+    is_new_grad = has_new_grad_indicator(job.title)
+    if check_title_keywords and not is_new_grad:
         return False
-
-    # If new grad but also has senior indicators, still exclude
-    # (e.g., "Senior Engineer - New Grad Program" should be excluded)
-    if is_senior_level(title_lower):
-        # Exception: if it has new grad keywords AND roman numeral I or level 1, allow it
-        # This handles cases like "SDE I - New Grad"
-        has_level_one = bool(re.search(r'\b(?:sde|swe|engineer|developer)\s*[i1]\b', title_lower, re.IGNORECASE))
-        if not has_level_one:
-            return False
-
-    # 3-4. Check each listed location separately. A multi-location posting is
-    # eligible when at least one location is allowed and preferred.
-    if job.location:
-        location_options = [
-            option.strip()
-            for option in job.location.split(";")
-            if option.strip()
-        ]
-        if not any(
-            not has_blocked_location(option) and matches_location(option)
-            for option in location_options
-        ):
-            return False
-    else:
-        # Empty location handling
-        if require_location and not is_new_grad:
-            # For generic scraped jobs, require location unless it's a new grad role
-            return False
-
-    return True
+    location = job.location.strip()
+    if not location:
+        return not require_location or is_new_grad
+    return any(
+        not has_blocked_location(option) and matches_location(option)
+        for part in location.split(";")
+        if (option := part.strip())
+    )

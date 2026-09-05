@@ -30,9 +30,6 @@ class TestTargetCompaniesDerivation:
     def test_no_duplicates(self):
         assert len(TARGET_COMPANIES) == len(set(TARGET_COMPANIES))
 
-    def test_sorted(self):
-        assert TARGET_COMPANIES == sorted(TARGET_COMPANIES)
-
     def test_priority_companies_are_configured_companies(self):
         for company in PRIORITY_COMPANIES:
             assert company in COMPANIES, f"priority company '{company}' not in COMPANIES"
@@ -41,41 +38,17 @@ class TestTargetCompaniesDerivation:
         assert COMPANY_FAILURE_ALERT_THRESHOLDS == [3]
 
 
-class TestShortNameMatching:
-    """Test that the length-aware matching in github_tracker works correctly."""
-
-    def test_exact_match_for_short_names(self):
-        """Short targets (len <= 2) should only match exact company names."""
-        # Simulate the matching logic from github_tracker._matches_criteria
-        def matches(company_name):
-            company_lower = company_name.lower()
-            return any(
-                (company_lower == target if len(target) <= 2 else target in company_lower)
-                for target in TARGET_COMPANIES
-            )
-
-        # "f5" is in TARGET_COMPANIES and should match "F5" exactly
-        assert matches("F5") is True
-        # "f5" should NOT match "Flexport" (substring match blocked for short targets)
-        assert matches("Flexport") is False
-
-    def test_substring_match_for_long_names(self):
-        """Longer targets should still use substring matching."""
-        def matches(company_name):
-            company_lower = company_name.lower()
-            return any(
-                (company_lower == target if len(target) <= 2 else target in company_lower)
-                for target in TARGET_COMPANIES
-            )
-
-        # "cockroach" alias should match "CockroachLabs"
-        assert matches("CockroachLabs") is True
-        # "epic games" should match "Epic Games"
-        assert matches("Epic Games") is True
-
-
 def test_structured_ats_configs_have_required_identifiers():
     needs_id = {"ashby", "smartrecruiters"}
     for company, config in COMPANIES.items():
         if config.get("ats") in needs_id:
             assert config.get("ats_id"), f"{company} needs an explicit ATS identifier"
+
+
+def test_corrected_career_sources_use_current_adapters():
+    assert COMPANIES["Temporal"]["ats"] == "ashby"
+    assert COMPANIES["Temporal"]["ats_id"] == "temporal"
+    assert COMPANIES["Twitter"]["ats"] == "smartrecruiters"
+    assert COMPANIES["Twitter"]["ats_id"] == "X"
+    assert COMPANIES["HRT"]["ats"] == "greenhouse"
+    assert COMPANIES["HRT"]["ats_id"] == "wehrtyou"

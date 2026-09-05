@@ -132,6 +132,13 @@ class TestHasExcludedTitle:
             "Cloud Solution Engineer 1",
             "Technical Product Marketing Engineer - New College Grad",
             "Android Mobile Software Developer I",
+            "Network Production Engineer (University Grad)",
+            "Applied Systems Engineering Rotation Engineer - New College Graduate 2026",
+            "Architecture Energy Modeling Engineer - New College Grad 2026",
+            "NMSI Module Engineer - Entry Level",
+            "Engineer I, Data Scientist - New Grad (Hybrid)",
+            "Design Verification (DV) Engineer - 2027 Grads",
+            "Algorithm Developer (Quant Research & Trading) - 2027 Grads",
         ],
     )
     def test_non_software_new_grad_engineering_roles(self, title):
@@ -237,3 +244,36 @@ class TestMatchesJobCriteria:
         """SDE I - New Grad should pass even if it has a senior-like pattern."""
         job = _make_job(title="SDE I - New Grad", location="Seattle, WA")
         assert matches_job_criteria(job) is True
+
+
+@pytest.mark.parametrize("title", [
+    "Senior Software Engineer I - New Grad",
+    "Staff SDE I - New Grad",
+    "Software Engineer I, New Grad, 3+ years",
+])
+def test_new_grad_words_do_not_override_seniority(title):
+    assert not matches_job_criteria(_make_job(title=title))
+
+
+@pytest.mark.parametrize("title, expected", [
+    ("Software Engineer", False),
+    ("Software Engineer - New Grad", True),
+    ("Software Engineer - Junior", True),
+])
+def test_optional_new_grad_filter_is_applied(title, expected):
+    assert matches_job_criteria(
+        _make_job(title=title), check_title_keywords=True,
+    ) is expected
+
+
+@pytest.mark.parametrize("title, expected", [
+    ("Software Engineer I, Internal Tools", True),
+    ("Software Engineer I, International Payments", True),
+    ("Software Engineering Internship 2026", False),
+])
+def test_internship_exclusion_uses_complete_words(title, expected):
+    assert matches_job_criteria(_make_job(title=title)) is expected
+
+
+def test_blank_location_requires_new_grad():
+    assert not matches_job_criteria(_make_job(location="   "), require_location=True)

@@ -14,16 +14,6 @@ class Job:
     source: str
     date_posted: Optional[str] = None
 
-    def to_dict(self) -> dict:
-        return {
-            "company": self.company,
-            "title": self.title,
-            "url": self.url,
-            "location": self.location,
-            "source": self.source,
-            "date_posted": self.date_posted,
-        }
-
     @property
     def unique_id(self) -> str:
         """Generate a unique ID for deduplication."""

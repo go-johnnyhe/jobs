@@ -12,7 +12,6 @@ MAX_EMBEDS_PER_MESSAGE = 10
 MAX_CONTENT_CHARS = 2000
 MAX_EMBED_TITLE_CHARS = 220
 MAX_EMBED_URL_CHARS = 2048
-MAX_FIELD_NAME_CHARS = 256
 MAX_JOB_FIELD_VALUE_CHARS = 220
 MAX_SOURCE_FIELD_VALUE_CHARS = 80
 MAX_ERROR_FIELD_VALUE_CHARS = 1024
@@ -27,30 +26,7 @@ class DiscordNotifier:
         # Disable all POST retries for Discord webhooks to avoid
         # duplicate messages (Discord may process POST before returning error,
         # and connection/timeout retries on POST can also duplicate)
-        self.session = create_session(status_forcelist=(), allowed_methods=("GET",))
-
-    def notify(self, jobs: list, dry_run: bool = False) -> bool:
-        """Send job notifications to Discord."""
-        if not jobs:
-            print("No jobs to notify about")
-            return True
-
-        if not self.webhook_url:
-            print("No Discord webhook URL configured")
-            return False
-
-        for batch_index, start in enumerate(range(0, len(jobs), MAX_EMBEDS_PER_MESSAGE)):
-            batch = jobs[start:start + MAX_EMBEDS_PER_MESSAGE]
-            sent = self.send_job_batch(
-                batch,
-                total_jobs=len(jobs),
-                batch_index=batch_index,
-                dry_run=dry_run,
-            )
-            if not sent:
-                return False
-
-        return True
+        self.session = create_session(retries=0)
 
     def send_job_batch(
         self,
@@ -147,20 +123,6 @@ class DiscordNotifier:
             dry_run=dry_run,
         )
 
-    def notify_source_recovery(
-        self,
-        source: str,
-        recovered_after: int,
-        dry_run: bool = False,
-    ) -> bool:
-        """Send an alert when a previously failing source recovers."""
-        return self._send_recovery_alert(
-            subject_type="Source",
-            name=source,
-            recovered_after=recovered_after,
-            dry_run=dry_run,
-        )
-
     def notify_company_failure(
         self,
         company: str,
@@ -187,7 +149,7 @@ class DiscordNotifier:
         dry_run: bool,
     ) -> bool:
         """Send a repeated-failure alert for a source or company."""
-        if not self.webhook_url:
+        if not self.webhook_url and not dry_run:
             print("No Discord webhook URL configured")
             return False
 
@@ -237,29 +199,27 @@ class DiscordNotifier:
             print(f"Error sending {subject_type.lower()} failure alert: {e}")
             return False
 
-    def _send_recovery_alert(
+    def notify_source_recovery(
         self,
-        *,
-        subject_type: str,
-        name: str,
+        source: str,
         recovered_after: int,
-        dry_run: bool,
+        dry_run: bool = False,
     ) -> bool:
-        """Send a recovery alert for a source or company."""
-        if not self.webhook_url:
+        """Send an alert when a previously failing source recovers."""
+        if not self.webhook_url and not dry_run:
             print("No Discord webhook URL configured")
             return False
 
         payload = {
-            "content": f"[{subject_type} recovery] `{name}` is healthy again",
+            "content": f"[Source recovery] `{source}` is healthy again",
             "embeds": [
                 {
-                    "title": f"Job {subject_type} Recovery",
+                    "title": "Job Source Recovery",
                     "color": 0x57F287,
                     "fields": [
                         {
-                            "name": subject_type,
-                            "value": name,
+                            "name": "Source",
+                            "value": source,
                             "inline": True,
                         },
                         {
@@ -273,16 +233,16 @@ class DiscordNotifier:
         }
 
         if dry_run:
-            print(f"Dry run - would send {subject_type.lower()} recovery alert:")
+            print("Dry run - would send source recovery alert:")
             print(json.dumps(payload, indent=2))
             return True
 
         try:
             self._send_payload(payload)
-            print(f"Sent {subject_type.lower()} recovery alert for {name}")
+            print(f"Sent source recovery alert for {source}")
             return True
         except requests.RequestException as e:
-            print(f"Error sending {subject_type.lower()} recovery alert: {e}")
+            print(f"Error sending source recovery alert: {e}")
             return False
 
     def _send_payload(self, payload: dict):
@@ -355,7 +315,7 @@ class DiscordNotifier:
             "color": color,
             "fields": [
                 {
-                    "name": self._truncate("Location", MAX_FIELD_NAME_CHARS),
+                    "name": "Location",
                     "value": self._truncate(
                         location,
                         MAX_JOB_FIELD_VALUE_CHARS,
@@ -363,7 +323,7 @@ class DiscordNotifier:
                     "inline": True,
                 },
                 {
-                    "name": self._truncate("Source", MAX_FIELD_NAME_CHARS),
+                    "name": "Source",
                     "value": self._truncate(
                         source or "Unknown",
                         MAX_SOURCE_FIELD_VALUE_CHARS,
@@ -385,7 +345,7 @@ class DiscordNotifier:
         url = str(url).strip()
         if not url.startswith(("http://", "https://")):
             return None
-        return self._truncate(url, MAX_EMBED_URL_CHARS)
+        return url if len(url) <= MAX_EMBED_URL_CHARS else None
 
     def _truncate(self, value, max_chars: int) -> str:
         """Truncate text to Discord field limits with an ASCII suffix."""
@@ -418,9 +378,9 @@ class DiscordNotifier:
 
         return 0x5865F2  # Discord Blurple default
 
-    def send_test(self) -> bool:
+    def send_test(self, dry_run: bool = False) -> bool:
         """Send a test notification."""
-        if not self.webhook_url:
+        if not self.webhook_url and not dry_run:
             print("No Discord webhook URL configured")
             return False
 
@@ -442,13 +402,13 @@ class DiscordNotifier:
             ],
         }
 
+        if dry_run:
+            print("Dry run - would send test notification:")
+            print(json.dumps(payload, indent=2))
+            return True
+
         try:
-            response = self.session.post(
-                self.webhook_url,
-                json=payload,
-                timeout=30,
-            )
-            response.raise_for_status()
+            self._send_payload(payload)
             print("Test notification sent successfully!")
             return True
         except requests.RequestException as e:

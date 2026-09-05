@@ -66,3 +66,34 @@ def test_fetch_uses_configured_raw_branch_without_github_api(monkeypatch):
     ]
     assert result.healthy is True
     assert [job.company for job in result.jobs] == ["Figma"]
+
+
+def test_continuation_rows_keep_company_and_separate_locations():
+    tracker = GitHubTracker()
+    result = tracker._parse_simplify_readme('''
+      <table>
+        <tr><td>Figma</td><td>Senior Software Engineer</td><td>Seattle, WA</td>
+            <td>🔒</td></tr>
+        <tr><td>↳</td><td>Software Engineer I</td><td>London, UK<br>Seattle, WA</td>
+            <td><a href="https://example.com/1">Apply</a></td></tr>
+        <tr><td>Untracked Company</td><td>Software Engineer</td><td>Seattle, WA</td>
+            <td><a href="https://example.com/2">Apply</a></td></tr>
+        <tr><td>↳</td><td>Software Engineer</td><td>Seattle, WA</td>
+            <td><a href="https://example.com/3">Apply</a></td></tr>
+      </table>
+      <table><tr><td>↳</td><td>Software Engineer</td><td>Seattle, WA</td>
+            <td><a href="https://example.com/4">Apply</a></td></tr></table>
+    ''', repo_name="test/repository")
+    assert [(job.company, job.url, job.source) for job in result.jobs] == [
+        ("Figma", "https://example.com/1", "test/repository")
+    ]
+    assert result.jobs[0].location == "London, UK; Seattle, WA"
+
+
+def test_company_matching_uses_real_filter(monkeypatch):
+    from sources import github_tracker
+    monkeypatch.setattr(github_tracker, "TARGET_COMPANIES", ["f5", "cockroach"])
+    tracker = GitHubTracker()
+    for company, expected in [("F5", True), ("F5 Labs", False), ("CockroachLabs", True)]:
+        job = Job(company, "Software Engineer", "https://example.com/1", "Seattle, WA", "test")
+        assert tracker._matches_criteria(job) is expected

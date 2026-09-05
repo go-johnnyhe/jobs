@@ -3,6 +3,7 @@
 
 import argparse
 import sys
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from sources import GitHubTracker, CareerScraper
 from storage import JobStorage
@@ -15,12 +16,43 @@ from config import (
 )
 
 MAX_PENDING_JOBS_TO_NOTIFY = 50
+_TRACKING_QUERY_KEYS = {"gh_src", "ref", "source"}
 
 
-def _iter_batches(items: list, batch_size: int):
-    """Yield fixed-size batches from a list."""
-    for start in range(0, len(items), batch_size):
-        yield items[start:start + batch_size]
+def _canonical_job_url(url: str) -> str:
+    """Remove tracking-only URL differences used by job aggregators."""
+    parts = urlsplit(url.strip())
+    query = urlencode([
+        (key, value)
+        for key, value in parse_qsl(parts.query, keep_blank_values=True)
+        if not key.lower().startswith("utm_")
+        and key.lower() not in _TRACKING_QUERY_KEYS
+    ])
+    path = parts.path.rstrip("/")
+    if parts.netloc.lower() == "jobs.lever.co" and path.endswith("/apply"):
+        path = path[:-len("/apply")]
+    return urlunsplit((
+        parts.scheme.lower(),
+        parts.netloc.lower(),
+        path,
+        query,
+        "",
+    ))
+
+
+def _deduplicate_scan_jobs(jobs: list) -> list:
+    """Keep one record per apply URL and prefer direct career sources."""
+    selected = {}
+    order = []
+    for job in jobs:
+        key = _canonical_job_url(job.url) or job.unique_id
+        existing = selected.get(key)
+        if existing is None:
+            selected[key] = job
+            order.append(key)
+        elif existing.source != "career_page" and job.source == "career_page":
+            selected[key] = job
+    return [selected[key] for key in order]
 
 
 def _format_age_hours(age_hours: int | None) -> str:
@@ -143,7 +175,8 @@ def _send_pending_notifications(storage: JobStorage, notifier: DiscordNotifier, 
     print(f"Sending Discord notifications for {len(jobs_to_send)} pending job(s)...")
     sent_jobs = 0
 
-    for batch_index, batch in enumerate(_iter_batches(jobs_to_send, MAX_EMBEDS_PER_MESSAGE)):
+    for batch_index, start in enumerate(range(0, len(jobs_to_send), MAX_EMBEDS_PER_MESSAGE)):
+        batch = jobs_to_send[start:start + MAX_EMBEDS_PER_MESSAGE]
         sent = notifier.send_job_batch(
             batch,
             total_jobs=len(jobs_to_send),
@@ -159,15 +192,14 @@ def _send_pending_notifications(storage: JobStorage, notifier: DiscordNotifier, 
             return False
 
         if not dry_run:
-            for job in batch:
-                storage.mark_notified(job)
+            storage.mark_notified(batch)
         sent_jobs += len(batch)
 
     if dry_run:
         print("Dry run complete; pending jobs were not marked as notified")
     else:
-        for job in skipped_jobs:
-            storage.mark_notified(job)
+        if skipped_jobs:
+            storage.mark_notified(skipped_jobs)
         print(f"Marked {sent_jobs} job(s) as notified")
         if skipped_jobs:
             print(f"Marked {len(skipped_jobs)} skipped older job(s) as handled")
@@ -221,6 +253,8 @@ def main():
     )
 
     args = parser.parse_args()
+    if args.list_recent is not None and args.list_recent < 0:
+        parser.error("--list-recent must be zero or greater")
 
     if args.audit_sources:
         scraper = CareerScraper()
@@ -259,7 +293,7 @@ def main():
 
     # Handle special commands
     if args.test_webhook:
-        success = notifier.send_test()
+        success = notifier.send_test(dry_run=args.dry_run)
         sys.exit(0 if success else 1)
 
     if args.stats:
@@ -292,7 +326,7 @@ def main():
             print(f"  {company}: {count}")
         return
 
-    if args.list_recent:
+    if args.list_recent is not None:
         jobs = storage.get_recent(args.list_recent)
         print(f"\n=== {len(jobs)} Most Recent Jobs ===\n")
         for job in jobs:
@@ -308,7 +342,6 @@ def main():
     print("=== Job Tracker ===\n")
 
     all_jobs = []
-    new_jobs = []
     source_statuses = []
     company_results = {}
 
@@ -347,15 +380,19 @@ def main():
             dry_run=args.dry_run,
         )
 
-    # Check for new jobs
+    # Check for new jobs. Prefer direct career records when the repository
+    # lists the same apply URL with tracking parameters.
     print("Checking for new jobs...")
-    for job in all_jobs:
-        if storage.is_new(job):
-            new_jobs.append(job)
-            storage.mark_seen(job, notified=False)
-            print(f"  NEW: {job.company} - {job.title}")
+    deduplicated_jobs = _deduplicate_scan_jobs(all_jobs)
+    duplicate_count = len(all_jobs) - len(deduplicated_jobs)
+    if duplicate_count:
+        print(f"  Removed {duplicate_count} duplicate listing(s) from this scan")
+    new_jobs = storage.add_jobs(deduplicated_jobs)
 
-    print(f"\nFound {len(new_jobs)} new job(s) out of {len(all_jobs)} total\n")
+    print(
+        f"\nFound {len(new_jobs)} new job(s) out of "
+        f"{len(deduplicated_jobs)} unique total\n"
+    )
 
     # Print all new jobs
     if new_jobs:

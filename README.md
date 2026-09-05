@@ -45,3 +45,20 @@ Structured Greenhouse, Lever, Ashby, Workday, SmartRecruiters, and Amazon
 adapters are preferred. Generic HTML sources are still checked as a fallback,
 but are reported as `DEGRADED` because JavaScript rendering and pagination can
 make their coverage incomplete.
+
+## Filtering and storage
+
+Senior titles are always excluded, even when they also contain new-grad words.
+Internship exclusions use complete words, so Internal Tools roles remain eligible.
+GitHub continuation rows use the preceding company name in the same table.
+
+Each scan stores new jobs in one database transaction. Each successful Discord
+batch is then marked as notified in one transaction. Failed batches remain pending.
+Dry runs can print notification payloads without a webhook URL. They still store
+scan results and source health; they do not mark jobs as notified.
+
+The storage API is `add_jobs(jobs)`, which returns newly stored jobs, and
+`mark_notified(jobs)`, which accepts a batch. Source callers use
+`fetch_jobs_with_status()`. These replace the former single-job storage calls
+and the unused `fetch_jobs()` wrappers. Notification callers use
+`send_job_batch()` in place of the removed `notify()` batching method.

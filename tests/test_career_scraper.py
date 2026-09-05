@@ -1691,6 +1691,86 @@ def test_workday_allows_a_small_number_of_duplicate_rows(monkeypatch):
     assert result.candidate_count == 99
 
 
+def test_workday_allows_a_small_number_of_incomplete_rows(monkeypatch):
+    scraper = cs.CareerScraper()
+    postings = [
+        {
+            "title": f"Software Engineer {number}",
+            "externalPath": f"/job/{number}",
+            "locationsText": "Seattle, WA",
+        }
+        for number in range(98)
+    ]
+    postings.extend([
+        {"bulletFields": ["JR99"]},
+        {"externalPath": "/job/100", "bulletFields": ["JR100"]},
+    ])
+
+    class Response:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"total": 100, "jobPostings": postings}
+
+    monkeypatch.setattr(
+        scraper.session,
+        "post",
+        lambda *_args, **_kwargs: Response(),
+    )
+    result = scraper._scrape_company(
+        "Capital One",
+        {
+            "ats": "workday",
+            "url": "https://capitalone.wd12.myworkdayjobs.com/Capital_One",
+        },
+    )
+
+    assert result.healthy is True
+    assert result.candidate_count == 98
+
+
+def test_workday_rejects_too_many_incomplete_rows(monkeypatch):
+    scraper = cs.CareerScraper()
+    postings = [
+        {
+            "title": f"Software Engineer {number}",
+            "externalPath": f"/job/{number}",
+            "locationsText": "Seattle, WA",
+        }
+        for number in range(97)
+    ]
+    postings.extend({"bulletFields": [f"JR{number}"]} for number in range(97, 100))
+
+    class Response:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"total": 100, "jobPostings": postings}
+
+    monkeypatch.setattr(
+        scraper.session,
+        "post",
+        lambda *_args, **_kwargs: Response(),
+    )
+    result = scraper._scrape_company(
+        "Acme",
+        {
+            "ats": "workday",
+            "url": "https://acme.wd5.myworkdayjobs.com/External",
+        },
+    )
+
+    assert result.status == "parse_failure"
+    assert result.candidate_count == 97
+    assert "97/100 unique Workday jobs" in result.error
+
+
 def test_workday_detail_urls_keep_candidate_site_path():
     scraper = cs.CareerScraper()
     posting = {
@@ -1718,3 +1798,46 @@ def test_workday_detail_urls_keep_candidate_site_path():
         "https://wd1.myworkdaysite.com/recruiting/"
         "snapchat/snap/job/Seattle/Software-Engineer/JR1"
     )
+
+
+def test_greenhouse_fallback_preserves_jobs_when_coverage_is_degraded(monkeypatch):
+    scraper = cs.CareerScraper()
+    def fail_get(*args, **kwargs):
+        raise requests.ConnectionError("API unavailable")
+    class Response:
+        text = '<a href="/jobs/1">Software Engineer New Grad</a>'
+        def raise_for_status(self):
+            pass
+    monkeypatch.setattr(scraper.session, "get", fail_get)
+    monkeypatch.setattr(scraper.generic_session, "get", lambda *a, **kw: Response())
+    result = scraper._scrape_company("Acme", {
+        "url": "https://acme.example/jobs", "ats": "greenhouse", "ats_id": "acme",
+    })
+    assert result.status == "degraded_success"
+    assert not result.healthy
+    assert [job.url for job in result.jobs] == ["https://acme.example/jobs/1"]
+    assert "API unavailable" in result.error
+
+
+def test_localized_workday_url_uses_board_not_language(monkeypatch):
+    scraper = cs.CareerScraper()
+    calls = []
+    class Response:
+        def raise_for_status(self):
+            pass
+        def json(self):
+            return {"total": 1, "jobPostings": [{
+                "title": "Software Engineer I", "externalPath": "/job/Seattle/Engineer_1",
+                "locationsText": "Seattle, WA",
+            }]}
+    def fake_post(url, **kwargs):
+        calls.append(url)
+        return Response()
+    monkeypatch.setattr(scraper.session, "post", fake_post)
+    result = scraper._scrape_company("Acme", {
+        "ats": "workday", "url": "https://acme.wd5.myworkdayjobs.com/en-US/External",
+    })
+    assert calls == ["https://acme.wd5.myworkdayjobs.com/wday/cxs/acme/External/jobs"]
+    assert [job.url for job in result.jobs] == [
+        "https://acme.wd5.myworkdayjobs.com/en-US/External/job/Seattle/Engineer_1",
+    ]

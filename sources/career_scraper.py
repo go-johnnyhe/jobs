@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import json
 import re
 from typing import Optional
+from urllib.parse import parse_qs, urljoin, urlparse
 from xml.etree import ElementTree
 
 import requests
@@ -19,9 +20,15 @@ from config import (
     CAREERS_MIN_HEALTHY_SUCCESS_RATE,
     CAREERS_MIN_HEALTHY_SUCCESSES,
 )
-from filters import matches_job_criteria
+from filters import has_role_keyword, matches_job_criteria
 from http_client import create_session
 from models import Job, ScrapeResult
+
+
+_ENTRY_LEVEL_RE = re.compile(
+    r"(?<!\w)(?:" + "|".join(map(re.escape, CAREER_ENTRY_LEVEL_KEYWORDS)) + r")(?!\w)",
+    re.IGNORECASE,
+)
 
 
 class CareerScraper:
@@ -36,18 +43,12 @@ class CareerScraper:
         self.last_attempted_companies = 0
         self.last_successful_companies = 0
         self.last_company_results: dict[str, ScrapeResult] = {}
-        self._run_request_errors: list[str] = []
         headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         }
         self.session.headers.update(headers)
         self.generic_session.headers.update(headers)
-
-    def fetch_jobs(self) -> list[Job]:
-        """Fetch all jobs from configured company career pages."""
-        jobs, _, _ = self.fetch_jobs_with_status()
-        return jobs
 
     def fetch_jobs_with_status(self) -> tuple[list[Job], bool, str]:
         """Fetch jobs and return (jobs, healthy, error_summary)."""
@@ -56,7 +57,6 @@ class CareerScraper:
         self.last_attempted_companies = 0
         self.last_successful_companies = 0
         self.last_company_results = {}
-        self._run_request_errors = []
 
         company_items = list(COMPANIES.items())
         with concurrent.futures.ThreadPoolExecutor(
@@ -280,14 +280,16 @@ class CareerScraper:
                         jobs.append(job)
                 return self._success_result(jobs, len(postings))
             except requests.RequestException as e:
-                request_error = self._record_request_error(company_name, api_url, e)
+                request_error = f"{company_name} ({api_url}): {e}"
                 # Fall back to HTML scraping
                 fallback_result = self._scrape_generic(company_name, url)
                 if fallback_result.healthy:
                     return fallback_result
                 return ScrapeResult(
-                    status="request_failure",
-                    error=request_error,
+                    jobs=fallback_result.jobs,
+                    candidate_count=fallback_result.candidate_count,
+                    status=fallback_result.status if fallback_result.jobs else "request_failure",
+                    error=f"{request_error}; {fallback_result.error}",
                 )
             except ValueError as e:
                 return ScrapeResult(
@@ -392,13 +394,15 @@ class CareerScraper:
                         jobs.append(job)
                 return self._success_result(jobs, len(data))
             except requests.RequestException as e:
-                request_error = self._record_request_error(company_name, api_url, e)
+                request_error = f"{company_name} ({api_url}): {e}"
                 fallback_result = self._scrape_generic(company_name, url)
                 if fallback_result.healthy:
                     return fallback_result
                 return ScrapeResult(
-                    status="request_failure",
-                    error=request_error,
+                    jobs=fallback_result.jobs,
+                    candidate_count=fallback_result.candidate_count,
+                    status=fallback_result.status if fallback_result.jobs else "request_failure",
+                    error=f"{request_error}; {fallback_result.error}",
                 )
             except ValueError as e:
                 return ScrapeResult(
@@ -440,7 +444,7 @@ class CareerScraper:
         except requests.RequestException as e:
             return ScrapeResult(
                 status="request_failure",
-                error=self._record_request_error(company_name, api_url, e),
+                error=f"{company_name} ({api_url}): {e}",
             )
         except ValueError as e:
             return ScrapeResult(
@@ -492,7 +496,7 @@ class CareerScraper:
         except requests.RequestException as e:
             return ScrapeResult(
                 status="request_failure",
-                error=self._record_request_error(company_name, api_url, e),
+                error=f"{company_name} ({api_url}): {e}",
             )
         except ValueError as e:
             return ScrapeResult(
@@ -516,7 +520,7 @@ class CareerScraper:
         return Job(
             company=company_name,
             title=title,
-            url=self._normalize_url(job_path, "https://www.amazon.jobs"),
+            url=urljoin("https://www.amazon.jobs", job_path),
             location=(
                 job_data.get("normalized_location")
                 or job_data.get("location")
@@ -562,7 +566,7 @@ class CareerScraper:
         except requests.RequestException as e:
             return ScrapeResult(
                 status="request_failure",
-                error=self._record_request_error(company_name, api_url, e),
+                error=f"{company_name} ({api_url}): {e}",
             )
         except ValueError as e:
             return ScrapeResult(
@@ -645,7 +649,7 @@ class CareerScraper:
         except requests.RequestException as e:
             return ScrapeResult(
                 status="request_failure",
-                error=self._record_request_error(company_name, api_url, e),
+                error=f"{company_name} ({api_url}): {e}",
             )
         except (TypeError, ValueError) as e:
             return ScrapeResult(
@@ -761,7 +765,7 @@ class CareerScraper:
         except requests.RequestException as e:
             return ScrapeResult(
                 status="request_failure",
-                error=self._record_request_error(company_name, api_url, e),
+                error=f"{company_name} ({api_url}): {e}",
             )
         except (TypeError, ValueError) as e:
             return ScrapeResult(
@@ -812,7 +816,7 @@ class CareerScraper:
         return Job(
             company=company_name,
             title=title,
-            url=self._normalize_url(position_url, base_url),
+            url=urljoin(base_url, position_url),
             location=location,
             source="career_page",
             date_posted=date_posted,
@@ -864,7 +868,7 @@ class CareerScraper:
         except requests.RequestException as e:
             return ScrapeResult(
                 status="request_failure",
-                error=self._record_request_error(company_name, api_url, e),
+                error=f"{company_name} ({api_url}): {e}",
             )
         except (TypeError, ValueError) as e:
             return ScrapeResult(
@@ -897,7 +901,7 @@ class CareerScraper:
         except requests.RequestException as e:
             return ScrapeResult(
                 status="request_failure",
-                error=self._record_request_error(company_name, api_url, e),
+                error=f"{company_name} ({api_url}): {e}",
             )
         except (TypeError, ValueError) as e:
             return ScrapeResult(
@@ -1044,7 +1048,7 @@ class CareerScraper:
         except requests.RequestException as e:
             return ScrapeResult(
                 status="request_failure",
-                error=self._record_request_error(company_name, api_url, e),
+                error=f"{company_name} ({api_url}): {e}",
             )
         except (TypeError, ValueError) as e:
             return ScrapeResult(
@@ -1079,7 +1083,7 @@ class CareerScraper:
             query_id = None
             soup = BeautifulSoup(page_response.text, "html.parser")
             for script in soup.find_all("script", src=True):
-                script_url = self._normalize_url(script["src"], url)
+                script_url = urljoin(url, script["src"])
                 if "static.xx.fbcdn.net" not in script_url:
                     continue
                 script_response = self.session.get(script_url, timeout=30)
@@ -1127,7 +1131,7 @@ class CareerScraper:
         except requests.RequestException as e:
             return ScrapeResult(
                 status="request_failure",
-                error=self._record_request_error(company_name, api_url, e),
+                error=f"{company_name} ({api_url}): {e}",
             )
         except (TypeError, ValueError) as e:
             return ScrapeResult(
@@ -1226,7 +1230,7 @@ class CareerScraper:
         except requests.RequestException as e:
             return ScrapeResult(
                 status="request_failure",
-                error=self._record_request_error(company_name, api_url, e),
+                error=f"{company_name} ({api_url}): {e}",
             )
         except (TypeError, ValueError) as e:
             return ScrapeResult(
@@ -1327,7 +1331,7 @@ class CareerScraper:
         except requests.RequestException as e:
             return ScrapeResult(
                 status="request_failure",
-                error=self._record_request_error(company_name, api_url, e),
+                error=f"{company_name} ({api_url}): {e}",
             )
         except (TypeError, ValueError) as e:
             return ScrapeResult(
@@ -1395,7 +1399,7 @@ class CareerScraper:
         except requests.RequestException as e:
             return ScrapeResult(
                 status="request_failure",
-                error=self._record_request_error(company_name, jobs_url, e),
+                error=f"{company_name} ({jobs_url}): {e}",
             )
         except (TypeError, ValueError) as e:
             return ScrapeResult(
@@ -1508,7 +1512,7 @@ class CareerScraper:
                     if not link:
                         raise ValueError("Two Sigma job is missing its detail link")
                     title = link.get_text(" ", strip=True)
-                    job_url = self._normalize_url(link.get("href", ""), url)
+                    job_url = urljoin(url, link.get("href", ""))
                     location_node = card.select_one(
                         ".article__header__content__text > span"
                     )
@@ -1542,7 +1546,6 @@ class CareerScraper:
                 )
                 if not next_link:
                     break
-                from urllib.parse import parse_qs, urlparse
                 next_values = parse_qs(urlparse(next_link["href"]).query).get(
                     "jobOffset"
                 )
@@ -1554,7 +1557,7 @@ class CareerScraper:
         except requests.RequestException as e:
             return ScrapeResult(
                 status="request_failure",
-                error=self._record_request_error(company_name, url, e),
+                error=f"{company_name} ({url}): {e}",
             )
         except (TypeError, ValueError) as e:
             return ScrapeResult(
@@ -1593,9 +1596,9 @@ class CareerScraper:
         except requests.RequestException as e:
             return ScrapeResult(
                 status="request_failure",
-                error=self._record_request_error(company_name, url, e),
+                error=f"{company_name} ({url}): {e}",
             )
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as e:
+        except (KeyError, TypeError, ValueError) as e:
             return ScrapeResult(
                 status="parse_failure",
                 error=f"{company_name} ({url}): invalid embedded jobs data ({e})",
@@ -1639,7 +1642,7 @@ class CareerScraper:
             job = Job(
                 company=company_name,
                 title=title,
-                url=self._normalize_url(f"careers/{job_path}", url),
+                url=urljoin(url, f"careers/{job_path}"),
                 location=location,
                 source="career_page",
                 date_posted=posting.get("validFromDate"),
@@ -1683,7 +1686,7 @@ class CareerScraper:
                     if not link:
                         raise ValueError("Etsy job is missing its detail link")
                     title = link.get_text(" ", strip=True)
-                    job_url = self._normalize_url(link.get("href", ""), url)
+                    job_url = urljoin(url, link.get("href", ""))
                     location_node = card.select_one(".job-component-location")
                     workplace_node = card.select_one(".job-component-workplace-type")
                     location_parts = []
@@ -1705,7 +1708,6 @@ class CareerScraper:
                     )
 
                 if total_pages is None:
-                    from urllib.parse import parse_qs, urlparse
                     page_values = [page_number]
                     for link in soup.find_all("a", href=True):
                         values = parse_qs(urlparse(link["href"]).query).get("page")
@@ -1716,7 +1718,7 @@ class CareerScraper:
         except requests.RequestException as e:
             return ScrapeResult(
                 status="request_failure",
-                error=self._record_request_error(company_name, url, e),
+                error=f"{company_name} ({url}): {e}",
             )
         except (TypeError, ValueError) as e:
             return ScrapeResult(
@@ -1774,7 +1776,7 @@ class CareerScraper:
         except requests.RequestException as e:
             return ScrapeResult(
                 status="request_failure",
-                error=self._record_request_error(company_name, api_url, e),
+                error=f"{company_name} ({api_url}): {e}",
             )
         except (TypeError, ValueError) as e:
             return ScrapeResult(
@@ -1922,7 +1924,7 @@ class CareerScraper:
         except requests.RequestException as e:
             return ScrapeResult(
                 status="request_failure",
-                error=self._record_request_error(company_name, api_url, e),
+                error=f"{company_name} ({api_url}): {e}",
             )
         except (TypeError, ValueError) as e:
             return ScrapeResult(
@@ -1974,7 +1976,7 @@ class CareerScraper:
         return Job(
             company=company_name,
             title=title,
-            url=self._normalize_url(path, base_url),
+            url=urljoin(base_url, path),
             location="; ".join(location_parts),
             source="career_page",
             date_posted=(
@@ -2005,7 +2007,7 @@ class CareerScraper:
         except requests.RequestException as e:
             return ScrapeResult(
                 status="request_failure",
-                error=self._record_request_error(company_name, api_url, e),
+                error=f"{company_name} ({api_url}): {e}",
             )
         except (TypeError, ValueError) as e:
             return ScrapeResult(
@@ -2147,7 +2149,7 @@ class CareerScraper:
                     job = Job(
                         company=company_name,
                         title=title_node.get_text(" ", strip=True),
-                        url=self._normalize_url(link.get("href", ""), detail_base),
+                        url=urljoin(detail_base, link.get("href", "")),
                         location="; ".join(locations),
                         source="career_page",
                     )
@@ -2166,7 +2168,7 @@ class CareerScraper:
         except requests.RequestException as e:
             return ScrapeResult(
                 status="request_failure",
-                error=self._record_request_error(company_name, url, e),
+                error=f"{company_name} ({url}): {e}",
             )
 
         return self._success_result(jobs, candidate_count)
@@ -2201,7 +2203,7 @@ class CareerScraper:
         except requests.RequestException as e:
             return ScrapeResult(
                 status="request_failure",
-                error=self._record_request_error(company_name, url, e),
+                error=f"{company_name} ({url}): {e}",
             )
 
         postings_by_url = {job.url: job for job in postings if job.url}
@@ -2235,7 +2237,7 @@ class CareerScraper:
                 jobs.append(Job(
                     company=company_name,
                     title=link.get_text(" ", strip=True),
-                    url=self._normalize_url(link.get("href", ""), url),
+                    url=urljoin(url, link.get("href", "")),
                     location=location.get_text(" ", strip=True),
                     source="career_page",
                 ))
@@ -2250,7 +2252,7 @@ class CareerScraper:
                 jobs.append(Job(
                     company=company_name,
                     title=link.get_text(" ", strip=True),
-                    url=self._normalize_url(link.get("href", ""), url),
+                    url=urljoin(url, link.get("href", "")),
                     location=location.get_text(" ", strip=True),
                     source="career_page",
                 ))
@@ -2264,7 +2266,7 @@ class CareerScraper:
                 jobs.append(Job(
                     company=company_name,
                     title=paragraphs[0].get_text(" ", strip=True),
-                    url=self._normalize_url(link.get("href", ""), url),
+                    url=urljoin(url, link.get("href", "")),
                     location=paragraphs[1].get_text(" ", strip=True),
                     source="career_page",
                 ))
@@ -2279,7 +2281,7 @@ class CareerScraper:
                 jobs.append(Job(
                     company=company_name,
                     title=paragraphs[1].get_text(" ", strip=True),
-                    url=self._normalize_url(link.get("href", ""), url),
+                    url=urljoin(url, link.get("href", "")),
                     location=paragraphs[0].get_text(" ", strip=True),
                     source="career_page",
                 ))
@@ -2294,7 +2296,7 @@ class CareerScraper:
                 jobs.append(Job(
                     company=company_name,
                     title=paragraphs[0].get_text(" ", strip=True),
-                    url=self._normalize_url(link.get("href", ""), url),
+                    url=urljoin(url, link.get("href", "")),
                     location=paragraphs[1].get_text(" ", strip=True),
                     source="career_page",
                 ))
@@ -2369,7 +2371,7 @@ class CareerScraper:
                 jobs.append(Job(
                     company=company_name,
                     title=title.get_text(" ", strip=True),
-                    url=self._normalize_url(href, url),
+                    url=urljoin(url, href),
                     location=location.get_text(" ", strip=True),
                     source="career_page",
                 ))
@@ -2384,7 +2386,7 @@ class CareerScraper:
         except requests.RequestException as e:
             return ScrapeResult(
                 status="request_failure",
-                error=self._record_request_error(company_name, feed_url, e),
+                error=f"{company_name} ({feed_url}): {e}",
             )
         except ElementTree.ParseError as e:
             return ScrapeResult(
@@ -2437,9 +2439,9 @@ class CareerScraper:
         except requests.RequestException as e:
             return ScrapeResult(
                 status="request_failure",
-                error=self._record_request_error(company_name, url, e),
+                error=f"{company_name} ({url}): {e}",
             )
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as e:
+        except (KeyError, TypeError, ValueError) as e:
             return ScrapeResult(
                 status="parse_failure",
                 error=f"{company_name} ({url}): invalid embedded jobs data ({e})",
@@ -2476,7 +2478,7 @@ class CareerScraper:
         except requests.RequestException as e:
             return ScrapeResult(
                 status="request_failure",
-                error=self._record_request_error(company_name, api_url, e),
+                error=f"{company_name} ({api_url}): {e}",
             )
         except (TypeError, ValueError) as e:
             return ScrapeResult(
@@ -2533,7 +2535,7 @@ class CareerScraper:
         except requests.RequestException as e:
             return ScrapeResult(
                 status="request_failure",
-                error=self._record_request_error(company_name, api_url, e),
+                error=f"{company_name} ({api_url}): {e}",
             )
         except (TypeError, ValueError) as e:
             return ScrapeResult(
@@ -2549,7 +2551,7 @@ class CareerScraper:
                 job = Job(
                     company=company_name,
                     title=title,
-                    url=self._normalize_url(href, "https://www.optiver.com"),
+                    url=urljoin("https://www.optiver.com", href),
                     location=posting.get("location", ""),
                     source="career_page",
                 )
@@ -2581,7 +2583,7 @@ class CareerScraper:
                     job = Job(
                         company=company_name,
                         title=text,
-                        url=self._normalize_url(href, url),
+                        url=urljoin(url, href),
                         location="",  # Hard to extract reliably
                         source="career_page",
                     )
@@ -2604,7 +2606,7 @@ class CareerScraper:
                 ),
             )
         except requests.RequestException as e:
-            request_error = self._record_request_error(company_name, url, e)
+            request_error = f"{company_name} ({url}): {e}"
             print(f"  Error fetching {url}: {e}")
             return ScrapeResult(
                 status="request_failure",
@@ -2615,6 +2617,7 @@ class CareerScraper:
         """Scrape jobs from Workday-powered career pages (CXS API)."""
         postings_by_url = {}
         records_seen = 0
+        records_without_url = 0
 
         tenant_site = self._extract_workday_tenant_site(url)
         if not tenant_site:
@@ -2656,7 +2659,7 @@ class CareerScraper:
                 response.raise_for_status()
                 data = response.json()
             except requests.RequestException as e:
-                request_error = self._record_request_error(company_name, api_url, e)
+                request_error = f"{company_name} ({api_url}): {e}"
                 print(f"  Error fetching Workday API for {company_name}: {e}")
                 return ScrapeResult(
                     status="request_failure",
@@ -2700,11 +2703,8 @@ class CareerScraper:
                     or ""
                 )
                 if not posting_url:
-                    return ScrapeResult(
-                        status="parse_failure",
-                        candidate_count=len(postings_by_url),
-                        error=f"{company_name} ({api_url}): Workday job missing URL",
-                    )
+                    records_without_url += 1
+                    continue
                 postings_by_url[str(posting_url)] = posting
 
             offset += len(postings)
@@ -2723,32 +2723,43 @@ class CareerScraper:
                 error=(
                     f"{company_name} ({api_url}): parsed "
                     f"{unique_count}/{total} unique Workday jobs"
+                    f" ({records_without_url} missing URL)"
                 ),
             )
 
         jobs = []
+        parsed_count = 0
         for posting in postings_by_url.values():
             job = self._parse_workday_job(company_name, posting, detail_base)
             if not job:
-                return ScrapeResult(
-                    status="parse_failure",
-                    candidate_count=len(postings_by_url),
-                    error=f"{company_name} ({api_url}): malformed Workday job record",
-                )
+                continue
+            parsed_count += 1
             if self._matches_criteria(job):
                 jobs.append(job)
-        return self._success_result(jobs, unique_count)
+        if total and parsed_count * 100 < total * 98:
+            return ScrapeResult(
+                status="parse_failure",
+                candidate_count=parsed_count,
+                error=(
+                    f"{company_name} ({api_url}): parsed "
+                    f"{parsed_count}/{total} complete Workday jobs"
+                ),
+            )
+        return self._success_result(jobs, parsed_count)
 
     def _extract_workday_tenant_site(self, url: str) -> Optional[tuple[str, str, str]]:
         """Extract Workday tenant and site from a Workday jobs URL."""
         try:
-            from urllib.parse import urlparse
             parsed = urlparse(url)
             host = parsed.netloc
             path_parts = [p for p in parsed.path.split("/") if p]
             if host.endswith(".myworkdayjobs.com"):
                 # Host is usually like "{tenant}.wd5.myworkdayjobs.com".
                 tenant = host.split(".")[0]
+                if not path_parts:
+                    return None
+                if re.fullmatch(r"[a-z]{2}-[A-Z]{2}", path_parts[0]):
+                    path_parts = path_parts[1:]
                 if not path_parts:
                     return None
                 site = path_parts[0]
@@ -2778,7 +2789,6 @@ class CareerScraper:
         if not title or not url_path:
             return None
 
-        from urllib.parse import urljoin
         if url_path.startswith(("https://", "http://")):
             url = url_path
         else:
@@ -2828,20 +2838,6 @@ class CareerScraper:
 
         return False
 
-    def _normalize_url(self, href: str, base_url: str) -> str:
-        """Convert relative URLs to absolute."""
-        if href.startswith("http"):
-            return href
-
-        from urllib.parse import urljoin
-        return urljoin(base_url, href)
-
-    def _record_request_error(self, company_name: str, url: str, error: Exception) -> str:
-        """Record a request failure for source health reporting."""
-        message = f"{company_name} ({url}): {error}"
-        self._run_request_errors.append(message)
-        return message
-
     def _success_result(self, jobs: list[Job], candidate_count: int) -> ScrapeResult:
         """Create a healthy scrape result."""
         status = "success" if jobs else "empty"
@@ -2858,14 +2854,11 @@ class CareerScraper:
     ) -> bool:
         """Check if a job matches our filtering criteria."""
         title_lower = job.title.lower()
-        if not any(kw in title_lower for kw in ROLE_KEYWORDS):
+        if not has_role_keyword(job.title):
             return False
         if self._is_career_content_page(job.url.lower(), title_lower):
             return False
-        if not explicit_entry_level and not any(
-            re.search(r"(?<!\w)" + re.escape(kw) + r"(?!\w)", title_lower)
-            for kw in CAREER_ENTRY_LEVEL_KEYWORDS
-        ):
+        if not explicit_entry_level and not _ENTRY_LEVEL_RE.search(title_lower):
             return False
         return matches_job_criteria(job, require_location=True)
 
