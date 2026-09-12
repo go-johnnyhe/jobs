@@ -52,3 +52,5 @@ def test_corrected_career_sources_use_current_adapters():
     assert COMPANIES["Twitter"]["ats_id"] == "X"
     assert COMPANIES["HRT"]["ats"] == "greenhouse"
     assert COMPANIES["HRT"]["ats_id"] == "wehrtyou"
+    assert COMPANIES["Wayfair"]["ats"] == "smartrecruiters"
+    assert COMPANIES["Wayfair"]["ats_id"] == "Wayfair"

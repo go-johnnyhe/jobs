@@ -498,8 +498,9 @@ COMPANIES = {
         "ats": "etsy",
     },
     "Wayfair": {
-        "url": "https://www.wayfair.com/careers/jobs?teamIds=1",
-        "ats": "internal",
+        "url": "https://careers.smartrecruiters.com/Wayfair",
+        "ats": "smartrecruiters",
+        "ats_id": "Wayfair",
     },
     "Chewy": {
         "url": "https://careers.chewy.com",
