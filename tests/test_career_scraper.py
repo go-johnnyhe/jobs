@@ -1,5 +1,6 @@
 """Tests for career scraper health signaling."""
 
+import pytest
 import requests
 
 from models import Job
@@ -196,6 +197,7 @@ def test_amazon_public_search_adapter(monkeypatch):
 
         def json(self):
             return {
+                "hits": 1,
                 "jobs": [
                     {
                         "id": "1",
@@ -1841,3 +1843,117 @@ def test_localized_workday_url_uses_board_not_language(monkeypatch):
     assert [job.url for job in result.jobs] == [
         "https://acme.wd5.myworkdayjobs.com/en-US/External/job/Seattle/Engineer_1",
     ]
+
+
+@pytest.mark.parametrize('adapter', ['amazon', 'smartrecruiters'])
+def test_search_adapters_find_matching_job_beyond_first_page(monkeypatch, adapter):
+    scraper = cs.CareerScraper()
+    calls = []
+
+    class Response:
+        def __init__(self, offset):
+            self.offset = offset
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            ids = range(100) if self.offset == 0 else [100]
+            postings = [
+                {
+                    'id': str(i),
+                    'title': 'Software Engineer - New Grad' if i == 100 else 'Senior Software Engineer',
+                    'name': 'Software Engineer - New Grad' if i == 100 else 'Senior Software Engineer',
+                    'job_path': f'/en/jobs/{i}/engineer',
+                    'normalized_location': 'Seattle, WA, USA',
+                    'location': {'fullLocation': 'Seattle, WA, USA'},
+                }
+                for i in ids
+            ]
+            if adapter == 'amazon':
+                return {'jobs': postings, 'hits': 101}
+            return {'content': postings, 'totalFound': 101}
+
+    def get(_url, *, params, **_kwargs):
+        calls.append(params['offset'])
+        return Response(params['offset'])
+
+    monkeypatch.setattr(scraper.session, 'get', get)
+    if adapter == 'amazon':
+        # Results can overlap between queries, but not within one query.
+        result = scraper._scrape_amazon('Amazon', ['new grad', 'engineer 1'])
+        assert calls == [0, 100, 0, 100]
+    else:
+        result = scraper._scrape_smartrecruiters('ServiceNow', 'ServiceNow')
+        assert calls == [0, 100]
+    assert result.healthy
+    assert result.candidate_count == 101
+    assert len(result.jobs) == 1
+    assert result.jobs[0].title == 'Software Engineer - New Grad'
+
+
+@pytest.mark.parametrize('adapter', ['amazon', 'smartrecruiters'])
+@pytest.mark.parametrize('failure', ['empty_page', 'repeated_page', 'missing_total', 'changed_total'])
+def test_search_adapters_reject_incomplete_results(monkeypatch, adapter, failure):
+    scraper = cs.CareerScraper()
+    calls = []
+
+    class Response:
+        def __init__(self, offset):
+            self.offset = offset
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            page = [{'id': '1'}]
+            if self.offset and failure == 'empty_page':
+                page = []
+            total = 3 if self.offset and failure == 'changed_total' else 2
+            if adapter == 'amazon':
+                payload = {'jobs': page, 'hits': total}
+                if failure == 'missing_total':
+                    del payload['hits']
+            else:
+                payload = {'content': page, 'totalFound': total}
+                if failure == 'missing_total':
+                    del payload['totalFound']
+            return payload
+
+    def get(_url, *, params, **_kwargs):
+        calls.append(params['offset'])
+        assert len(calls) <= 2
+        return Response(params['offset'])
+
+    monkeypatch.setattr(scraper.session, 'get', get)
+    if adapter == 'amazon':
+        result = scraper._scrape_amazon('Amazon', ['new grad'])
+    else:
+        result = scraper._scrape_smartrecruiters('ServiceNow', 'ServiceNow')
+    assert result.status == 'parse_failure'
+    assert not result.healthy
+    assert result.jobs == []
+    assert result.error
+
+
+@pytest.mark.parametrize('adapter', ['amazon', 'smartrecruiters'])
+def test_search_adapters_accept_confirmed_empty_results(monkeypatch, adapter):
+    scraper = cs.CareerScraper()
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            if adapter == 'amazon':
+                return {'jobs': [], 'hits': 0}
+            return {'content': [], 'totalFound': 0}
+
+    monkeypatch.setattr(scraper.session, 'get', lambda *_args, **_kwargs: Response())
+    if adapter == 'amazon':
+        result = scraper._scrape_amazon('Amazon', ['new grad'])
+    else:
+        result = scraper._scrape_smartrecruiters('ServiceNow', 'ServiceNow')
+    assert result.healthy
+    assert result.status == 'empty'
+    assert result.candidate_count == 0

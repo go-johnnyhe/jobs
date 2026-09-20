@@ -48,9 +48,9 @@ def test_structured_ats_configs_have_required_identifiers():
 def test_corrected_career_sources_use_current_adapters():
     assert COMPANIES["Temporal"]["ats"] == "ashby"
     assert COMPANIES["Temporal"]["ats_id"] == "temporal"
-    assert COMPANIES["Twitter"]["ats"] == "smartrecruiters"
-    assert COMPANIES["Twitter"]["ats_id"] == "X"
+    assert COMPANIES["Twitter"]["url"] == "https://careers.x.com"
+    assert COMPANIES["Twitter"]["ats"] == "internal"
     assert COMPANIES["HRT"]["ats"] == "greenhouse"
     assert COMPANIES["HRT"]["ats_id"] == "wehrtyou"
-    assert COMPANIES["Wayfair"]["ats"] == "smartrecruiters"
-    assert COMPANIES["Wayfair"]["ats_id"] == "Wayfair"
+    assert COMPANIES["Wayfair"]["url"] == "https://www.wayfair.com/careers/jobs"
+    assert COMPANIES["Wayfair"]["ats"] == "internal"

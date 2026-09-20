@@ -478,21 +478,43 @@ class CareerScraper:
         postings_by_id = {}
         try:
             for query in search_queries:
-                response = self.session.get(
-                    api_url,
-                    params={
-                        "base_query": query,
-                        "offset": 0,
-                        "result_limit": 100,
-                    },
-                    timeout=30,
-                )
-                response.raise_for_status()
-                data = response.json()
-                for posting in data.get("jobs", []):
-                    posting_id = posting.get("id") or posting.get("job_path")
-                    if posting_id:
-                        postings_by_id[posting_id] = posting
+                offset = 0
+                total = None
+                query_ids = set()
+                while total is None or offset < total:
+                    response = self.session.get(
+                        api_url,
+                        params={
+                            "base_query": query,
+                            "offset": offset,
+                            "result_limit": 100,
+                        },
+                        timeout=30,
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+                    page = data.get("jobs")
+                    page_total = data.get("hits")
+                    if (
+                        not isinstance(page, list)
+                        or type(page_total) is not int
+                        or page_total < 0
+                    ):
+                        raise ValueError("missing Amazon jobs or hits")
+                    if total is not None and page_total != total:
+                        raise ValueError("Amazon hits changed during pagination")
+                    total = page_total
+                    if not page and offset < total:
+                        raise ValueError(f"pagination ended at {offset}/{total} jobs")
+                    for posting in page:
+                        posting_id = posting.get("id") or posting.get("job_path")
+                        if not posting_id or str(posting_id) in query_ids:
+                            raise ValueError("missing or repeated Amazon job ID")
+                        query_ids.add(str(posting_id))
+                        postings_by_id[str(posting_id)] = posting
+                    offset += len(page)
+                if offset != total:
+                    raise ValueError(f"parsed {offset}/{total} advertised Amazon jobs")
         except requests.RequestException as e:
             return ScrapeResult(
                 status="request_failure",
@@ -501,7 +523,7 @@ class CareerScraper:
         except ValueError as e:
             return ScrapeResult(
                 status="parse_failure",
-                error=f"{company_name} ({api_url}): invalid JSON response ({e})",
+                error=f"{company_name} ({api_url}): invalid search response ({e})",
             )
 
         jobs = []
@@ -548,8 +570,10 @@ class CareerScraper:
         postings = []
         offset = 0
         limit = 100
+        total = None
+        seen_ids = set()
         try:
-            while True:
+            while total is None or offset < total:
                 response = self.session.get(
                     api_url,
                     params={"limit": limit, "offset": offset},
@@ -557,12 +581,28 @@ class CareerScraper:
                 )
                 response.raise_for_status()
                 data = response.json()
-                page = data.get("content", [])
+                page = data.get("content")
+                page_total = data.get("totalFound")
+                if (
+                    not isinstance(page, list)
+                    or type(page_total) is not int
+                    or page_total < 0
+                ):
+                    raise ValueError("missing SmartRecruiters content or totalFound")
+                if total is not None and page_total != total:
+                    raise ValueError("SmartRecruiters totalFound changed during pagination")
+                total = page_total
+                if not page and offset < total:
+                    raise ValueError(f"pagination ended at {offset}/{total} jobs")
+                for posting in page:
+                    posting_id = posting.get("id")
+                    if not posting_id or str(posting_id) in seen_ids:
+                        raise ValueError("missing or repeated SmartRecruiters job ID")
+                    seen_ids.add(str(posting_id))
                 postings.extend(page)
                 offset += len(page)
-                total = data.get("totalFound", len(postings))
-                if not page or offset >= total:
-                    break
+            if offset != total:
+                raise ValueError(f"parsed {offset}/{total} advertised SmartRecruiters jobs")
         except requests.RequestException as e:
             return ScrapeResult(
                 status="request_failure",
@@ -571,7 +611,7 @@ class CareerScraper:
         except ValueError as e:
             return ScrapeResult(
                 status="parse_failure",
-                error=f"{company_name} ({api_url}): invalid JSON response ({e})",
+                error=f"{company_name} ({api_url}): invalid search response ({e})",
             )
 
         jobs = []

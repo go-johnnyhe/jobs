@@ -375,9 +375,11 @@ COMPANIES = {
         "ats": "workday",
     },
     "Twitter": {
-        "url": "https://careers.smartrecruiters.com/X",
-        "ats": "smartrecruiters",
-        "ats_id": "X",
+        # The old SmartRecruiters feed contains only 2024 postings. This
+        # official page redirects to xAI, whose Greenhouse board is also
+        # configured below. Keep blocked/incomplete coverage visible.
+        "url": "https://careers.x.com",
+        "ats": "internal",
     },
     # Seattle Tech
     "Redfin": {
@@ -498,9 +500,10 @@ COMPANIES = {
         "ats": "etsy",
     },
     "Wayfair": {
-        "url": "https://careers.smartrecruiters.com/Wayfair",
-        "ats": "smartrecruiters",
-        "ats_id": "Wayfair",
+        # SmartRecruiters only exposes a 2017 posting, not the current board.
+        # Use the official source even when it reports a rate-limit failure.
+        "url": "https://www.wayfair.com/careers/jobs",
+        "ats": "internal",
     },
     "Chewy": {
         "url": "https://careers.chewy.com",
