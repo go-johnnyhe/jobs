@@ -55,6 +55,7 @@ def save_state_file(path: str, storage: JobStorage):
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(text)
+        os.chmod(temp_path, 0o644)
         os.replace(temp_path, path)
     except BaseException:
         if os.path.exists(temp_path):
