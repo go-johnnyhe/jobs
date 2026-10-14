@@ -351,7 +351,6 @@ def _process_scan(
         print(f"  Removed {summary['duplicates_in_scan']} duplicate listing(s) from this scan")
     new_jobs, known_jobs = storage.partition_new(deduplicated_jobs)
     summary["unique"] = len(deduplicated_jobs)
-    summary["flags"] = _flag_counts(deduplicated_jobs)
     summary["already_known"] = len(known_jobs)
     summary["new"] = len(new_jobs)
 
@@ -383,9 +382,15 @@ def _process_scan(
             reason = screen_job(job)
             if reason:
                 screened_out[reason].append(job)
+                print(
+                    f"  Screened out after description fetch: {job.company} - {job.title}"
+                    f" ({job.screening_notes[0] if job.screening_notes else reason})"
+                )
                 continue
         queued.append(job)
     summary["screened_after_fetch"] = {reason: len(jobs) for reason, jobs in screened_out.items()}
+    dropped = {id(job) for jobs in screened_out.values() for job in jobs}
+    summary["flags"] = _flag_counts([job for job in deduplicated_jobs if id(job) not in dropped])
 
     storage.add_jobs(
         baseline,
@@ -440,7 +445,7 @@ def _print_summary(summary: dict):
     flags = summary.get("flags")
     if flags:
         details = ", ".join(f"{name}={count}" for name, count in sorted(flags.items()))
-        print(f"  Flags on unique matched jobs: {details}")
+        print(f"  Flags on kept jobs (after description fetch): {details}")
 
 
 def _flag_counts(jobs: list[Job]) -> dict[str, int]:
