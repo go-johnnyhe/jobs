@@ -53,7 +53,7 @@ def test_extract_description_formats():
     assert extract_description({"content": "&lt;p&gt;We sponsor visas.&lt;/p&gt;"}) == "We sponsor visas."
     assert extract_description(
         {"jobPostingInfo": {"jobDescription": "<p>Must be a <b>U.S. citizen</b>.</p>"}}
-    ) == "Must be a U.S. citizen ."
+    ) == "Must be a U.S. citizen."
     assert extract_description({"descriptionPlain": "plain"}) == "plain"
     assert extract_description({}) == ""
     assert extract_description(["not", "a", "dict"]) == ""

@@ -267,3 +267,64 @@ def test_screen_job_without_signals_keeps_defaults():
     job = Job("Acme", "Software Engineer", "https://acme.example/2", "Seattle, WA", "list")
     assert screen_job(job) is None
     assert (job.sponsorship, job.seniority_flag, job.screening_notes) == ("unknown", "none", [])
+
+
+PALANTIR_STYLE_VALUE = (
+    "A World-Changing Company\nWe build software.\n"
+    "What We Value\n"
+    "Willingness to learn and make decisions independently.\n"
+    "Active US Security clearance, or eligibility and willingness to obtain a US Security clearance.\n"
+    "What We Require\n"
+    "Engineering background in fields such as Computer Science.\n"
+)
+PALANTIR_STYLE_REQUIRE = (
+    "What We Require\n"
+    "Strong coder with shown proficiency in Java or Go\n"
+    "Active US Security clearance, or eligibility and willingness to obtain a US Security clearance\n"
+    "Salary\nThe estimated salary range is $135,000 - $145,000/year.\n"
+)
+
+
+def test_clearance_under_a_preference_heading_is_not_required():
+    result = screen_text(description=PALANTIR_STYLE_VALUE)
+    assert result.clearance_required is False
+    assert result.drop_reason is None
+    assert result.notes == [
+        "security clearance preferred: 'Security clearance'",
+    ]
+
+
+def test_clearance_under_requirements_is_required():
+    result = screen_text(description=PALANTIR_STYLE_REQUIRE)
+    assert result.clearance_required is True
+    assert result.drop_reason == DROP_CLEARANCE
+
+
+def test_clearance_marked_preferred_in_the_sentence():
+    result = screen_text(description="Secret clearance preferred.")
+    assert result.clearance_required is False
+    assert result.drop_reason is None
+
+
+def test_experience_under_preferred_qualifications_heading():
+    html = (
+        "<h3>Minimum Qualifications</h3><ul><li>BS in Computer Science</li>"
+        "<li>1+ years of experience</li></ul>"
+        "<h3>Preferred Qualifications</h3><ul><li>3+ years of industry experience</li></ul>"
+    )
+    result = screen_text(description=html_to_text(html))
+    assert result.min_years_experience == 1
+    assert result.seniority_flag == "none"
+    assert "prefers 3+ years of experience" in result.notes
+
+
+def test_short_requirement_bullets_are_not_mistaken_for_headings():
+    text = "Nice to have\nRust\nRequirements\n3+ years of experience\nBonus: Kubernetes\n2+ years of Go experience"
+    result = screen_text(description=text)
+    assert result.min_years_experience == 3
+    assert result.seniority_flag == "borderline"
+
+
+def test_html_to_text_keeps_block_structure():
+    html = "<p>About us</p><p>We <b>build</b> things.</p><ul><li>One</li><li>Two</li></ul>Tail<br>End"
+    assert html_to_text(html) == "About us\nWe build things.\nOne\nTwo\nTail\nEnd"

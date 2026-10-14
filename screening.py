@@ -79,6 +79,22 @@ _EXPERIENCE_RE = re.compile(
     re.IGNORECASE,
 )
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.;!?])\s+|\n+|\s+[•·]\s+")
+# Section headings such as Lever's "What We Value" / "What We Require". Text
+# under a preference heading states nice-to-haves, not requirements.
+_PREFERENCE_HEADING_RE = re.compile(
+    r"\b(?:what\s+we\s+value|nice[\s-]to[\s-]haves?|preferred|bonus|pluses|a\s+plus"
+    r"|desired|ideally|extra\s+credit|good\s+to\s+have|we'?d\s+love)\b",
+    re.IGNORECASE,
+)
+_HEADING_RE = re.compile(
+    r"^(?:what\s+(?:we|you)|who\s+(?:we|you)|requirements?|required|minimum|basic|preferred"
+    r"|nice|bonus|desired|ideal|extra|pluses|qualifications?|responsibilities|about"
+    r"|the\s+(?:role|team|opportunity)|your|you(?:'ll|\s+will|\s+have|\s+bring|\s+are)"
+    r"|skills|benefits|compensation|salary|pay|key|job|position|overview|summary"
+    r"|additional|day[\s-]to[\s-]day|why|how|in\s+this\s+role)\b",
+    re.IGNORECASE,
+)
+_BLOCK_TAGS = ("p", "li", "ul", "ol", "div", "br", "h1", "h2", "h3", "h4", "h5", "h6", "tr", "section")
 
 
 @dataclass
@@ -127,8 +143,31 @@ def html_to_text(value: str) -> str:
         return ""
     text = html.unescape(str(value))
     if "<" in text and ">" in text:
-        text = BeautifulSoup(text, "html.parser").get_text(" ")
-    return re.sub(r"[ \t\r\f\v\u00a0]+", " ", text).strip()
+        soup = BeautifulSoup(text, "html.parser")
+        for tag in soup.find_all(_BLOCK_TAGS):
+            tag.insert_before("\n")
+            tag.insert_after("\n")
+        text = soup.get_text("")
+    lines = (re.sub(r"[ \t\r\f\v\u00a0]+", " ", line).strip() for line in text.split("\n"))
+    return "\n".join(line for line in lines if line)
+
+
+def _split_sections(text: str) -> tuple[str, str]:
+    """Return (text outside preference sections, text inside them)."""
+    regular, preferred = [], []
+    in_preferred = False
+    for line in text.split("\n"):
+        stripped = line.strip()
+        is_heading = (
+            0 < len(stripped) <= 60
+            and not stripped.endswith((".", "!", "?", ";", ","))
+            and ":" not in stripped[:-1]
+            and (stripped.endswith(":") or _HEADING_RE.search(stripped))
+        )
+        if is_heading:
+            in_preferred = bool(_PREFERENCE_HEADING_RE.search(stripped))
+        (preferred if in_preferred else regular).append(line)
+    return "\n".join(regular), "\n".join(preferred)
 
 
 def _affirmed_matches(patterns: list[re.Pattern], text: str) -> list[str]:
@@ -212,10 +251,17 @@ def screen_text(
         result.citizenship_required = True
         result.notes.append(f"citizenship required: '{_short(citizenship[0])}'")
 
-    clearance = _affirmed_matches(_CLEARANCE_RE, text)
+    regular_text, preferred_text = _split_sections(description)
+    clearance, clearance_preferred = [], []
+    for sentence in _SENTENCE_SPLIT_RE.split(f"{title}.\n{regular_text}"):
+        found = _affirmed_matches(_CLEARANCE_RE, sentence)
+        (clearance_preferred if _PREFERRED_RE.search(sentence) else clearance).extend(found)
+    clearance_preferred += _affirmed_matches(_CLEARANCE_RE, preferred_text)
     if clearance:
         result.clearance_required = True
         result.notes.append(f"security clearance: '{_short(clearance[0])}'")
+    elif clearance_preferred:
+        result.notes.append(f"security clearance preferred: '{_short(clearance_preferred[0])}'")
 
     opt = _any_match(_OPT_RE, text)
     if opt:
@@ -226,7 +272,10 @@ def screen_text(
         result.advanced_degree = True
         result.notes.append("list marker: advanced degree required")
 
-    required, preferred = _experience_years(description)
+    required, preferred = _experience_years(regular_text)
+    section_required, section_preferred = _experience_years(preferred_text)
+    preferred_values = [v for v in (preferred, section_required, section_preferred) if v is not None]
+    preferred = max(preferred_values) if preferred_values else None
     result.min_years_experience = required
     if required is not None and required >= SCREENING["experience_flag_min_years"]:
         result.notes.append(f"requires {required}+ years of experience")
