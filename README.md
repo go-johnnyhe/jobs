@@ -205,7 +205,7 @@ pip install -r requirements-dev.txt  # Install dev dependencies (adds pytest)
 python -m pytest tests/ -v           # Run all tests
 ```
 
-The **Tests** workflow runs the suite on every push and pull request.
+The **Tests** workflow runs the suite on pull requests and pushes to `main`.
 `tests/fixtures/` holds trimmed real snapshots of the SimplifyJobs HTML README,
 its earlier markdown README, and the speedyapply list; refresh them when a list
 changes format.

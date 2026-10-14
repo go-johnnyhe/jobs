@@ -2,8 +2,7 @@ name: Tests
 
 on:
   push:
-    branches-ignore:
-      - job-tracker-state
+    branches: [main]
   pull_request:
 
 permissions:
