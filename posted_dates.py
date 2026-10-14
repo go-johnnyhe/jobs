@@ -5,7 +5,7 @@ import re
 from typing import Optional
 
 _RELATIVE_RE = re.compile(
-    r"^\s*(\d+)\s*(h|hr|hrs|hours?|d|days?|w|wk|weeks?|mo|mos|months?|y|yr|years?)\s*(?:ago)?\s*$",
+    r"^\s*(?:posted\s+)?(\d+)\+?\s*(h|hr|hrs|hours?|d|days?|w|wk|weeks?|mo|mos|months?|y|yr|years?)\s*(?:ago)?\s*$",
     re.IGNORECASE,
 )
 _UNIT_DAYS = {"h": 0, "d": 1, "w": 7, "m": 30, "y": 365}
@@ -42,7 +42,7 @@ def normalize_posted_date(raw, now: Optional[datetime] = None) -> Optional[str]:
         if key == "h":
             return (current - timedelta(hours=amount)).date().isoformat()
         return (current - timedelta(days=amount * _UNIT_DAYS[key])).date().isoformat()
-    if text.lower() in {"today", "posted today", "just posted"}:
+    if text.lower() in {"today", "posted today", "just posted", "new"}:
         return current.date().isoformat()
     if text.lower() in {"yesterday", "posted yesterday"}:
         return (current - timedelta(days=1)).date().isoformat()

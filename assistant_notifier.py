@@ -127,7 +127,7 @@ class AssistantNotifier:
         self.sleep = sleep
         # Retries are handled here so Retry-After and the attempt count are
         # explicit; the batch idempotency key lets the receiver drop repeats.
-        self.session = create_session(retries=0)
+        self.session = create_session(retries=0, status_forcelist=())
 
     @property
     def configured(self) -> bool:

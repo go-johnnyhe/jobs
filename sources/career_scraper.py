@@ -2722,7 +2722,8 @@ class CareerScraper:
             if isinstance(query_result, ScrapeResult):
                 return query_result
             query_postings, query_total = query_result
-            postings_by_url.update(query_postings)
+            for posting_url, posting in query_postings.items():
+                postings_by_url.setdefault(posting_url, posting)
             expected_total = query_total
         if len(queries) > 1:
             expected_total = len(postings_by_url)
