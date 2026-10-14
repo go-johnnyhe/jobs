@@ -71,27 +71,53 @@ def test_career_source_label_is_user_friendly():
     assert embed["fields"][1]["value"] == "Company career page"
 
 
-def test_backlog_summary_payload(monkeypatch):
+def test_first_batch_mentions_jobs_queued_for_later_runs():
     notifier = DiscordNotifier("https://discord.example/webhook")
-    payloads = []
+    jobs = [_make_job(index) for index in range(3)]
 
-    def fake_send_payload(payload):
-        payloads.append(payload)
+    first = notifier._build_job_batch_payload(
+        jobs, total_jobs=50, batch_index=0, queued_after=173,
+    )
+    later = notifier._build_job_batch_payload(
+        jobs, total_jobs=50, batch_index=1, queued_after=173,
+    )
+    plain = notifier._build_job_batch_payload(jobs, total_jobs=3, batch_index=0)
 
-    monkeypatch.setattr(notifier, "_send_payload", fake_send_payload)
+    assert first["content"] == (
+        "**New Job Alert!** Sending 3 of 50 position(s) "
+        "(173 more queued; they will be sent in the next run(s))"
+    )
+    assert "queued" not in later["content"]
+    assert plain["content"] == "**New Job Alert!** Sending 3 of 3 position(s)"
 
-    success = notifier.notify_backlog_skipped(173, 20)
 
-    assert success is True
-    assert payloads == [
-        {
-            "content": (
-                "Job Tracker recovered from a notification backlog. "
-                "Skipped 173 older pending job(s) and will send the newest "
-                "20 pending job(s)."
-            )
-        }
-    ]
+def test_plain_job_embed_is_unchanged_without_screening_flags():
+    notifier = DiscordNotifier("https://discord.example/webhook")
+    embed = notifier._build_embed(_make_job(1))
+
+    assert [field["name"] for field in embed["fields"]] == ["Location", "Source"]
+
+
+def test_screening_flags_are_shown_for_stored_rows():
+    notifier = DiscordNotifier("https://discord.example/webhook")
+    row = {
+        "company": "Acme",
+        "title": "Software Engineer",
+        "url": "https://example.com/1",
+        "location": "Seattle, WA",
+        "source": "career_page",
+        "sponsorship": "yes",
+        "seniority_flag": "borderline",
+        "min_years_experience": 2,
+    }
+
+    embed = notifier._build_embed(row)
+
+    assert embed["fields"][-1] == {
+        "name": "Screening",
+        "value": "Visa sponsorship mentioned | Asks for 2+ years (borderline)",
+        "inline": False,
+    }
 
 
 def test_full_batch_stays_under_discord_embed_character_limit():

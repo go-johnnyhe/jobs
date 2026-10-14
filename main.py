@@ -2,50 +2,53 @@
 """Job Tracker - Main entry point."""
 
 import argparse
+from collections import Counter, defaultdict
+from datetime import datetime, timedelta, timezone
 import sys
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from typing import Optional
 
 from sources import GitHubTracker, CareerScraper
-from storage import JobStorage
+from storage import JobStorage, PENDING, SUPPRESSED
 from notifier import DiscordNotifier, MAX_EMBEDS_PER_MESSAGE
+from assistant_notifier import AssistantNotifier
+from enrichment import enrich_descriptions
+from job_keys import dedupe_key
+from models import Job
+from screening import screen_job
+from state_store import load_state_file, save_state_file
 from config import (
+    ASSISTANT_MAX_JOBS_PER_RUN,
+    ASSISTANT_MAX_PENDING_AGE_HOURS,
     COMPANY_FAILURE_ALERT_THRESHOLDS,
+    DISCORD_MAX_PENDING_AGE_HOURS,
     ENABLE_COMPANY_HEALTH_ALERTS,
+    FULL_SCAN_INTERVAL_MINUTES,
+    MAX_PENDING_JOBS_TO_NOTIFY,
+    NEW_SOURCE_BASELINE_MAX_JOBS,
     PRIORITY_COMPANIES,
+    SCREENING,
     SOURCE_FAILURE_ALERT_THRESHOLDS,
+    STATE_RETENTION_DAYS,
 )
 
-MAX_PENDING_JOBS_TO_NOTIFY = 50
-_TRACKING_QUERY_KEYS = {"gh_src", "ref", "source"}
+META_LAST_FULL_SCAN = "last_full_scan_at"
+META_FRESH_INSTALL = "fresh_install"
 
 
-def _canonical_job_url(url: str) -> str:
-    """Remove tracking-only URL differences used by job aggregators."""
-    parts = urlsplit(url.strip())
-    query = urlencode([
-        (key, value)
-        for key, value in parse_qsl(parts.query, keep_blank_values=True)
-        if not key.lower().startswith("utm_")
-        and key.lower() not in _TRACKING_QUERY_KEYS
-    ])
-    path = parts.path.rstrip("/")
-    if parts.netloc.lower() == "jobs.lever.co" and path.endswith("/apply"):
-        path = path[:-len("/apply")]
-    return urlunsplit((
-        parts.scheme.lower(),
-        parts.netloc.lower(),
-        path,
-        query,
-        "",
-    ))
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _iso(moment: datetime) -> str:
+    return moment.astimezone(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
 
 
 def _deduplicate_scan_jobs(jobs: list) -> list:
-    """Keep one record per apply URL and prefer direct career sources."""
+    """Keep one record per posting and prefer direct career sources."""
     selected = {}
     order = []
     for job in jobs:
-        key = _canonical_job_url(job.url) or job.unique_id
+        key = dedupe_key(job.url, job.title) or job.unique_id
         existing = selected.get(key)
         if existing is None:
             selected[key] = job
@@ -147,30 +150,27 @@ def _update_company_health(
 
 
 def _send_pending_notifications(storage: JobStorage, notifier: DiscordNotifier, *, dry_run: bool):
-    """Send pending notifications oldest-first and mark only sent batches."""
+    """Send pending Discord notifications oldest-first and mark only sent batches.
+
+    At most MAX_PENDING_JOBS_TO_NOTIFY jobs go out per run. The rest stay
+    pending for later runs; nothing is marked notified unless it was sent.
+    """
+    if DISCORD_MAX_PENDING_AGE_HOURS is not None and not dry_run:
+        retired = storage.retire_stale_pending("discord", DISCORD_MAX_PENDING_AGE_HOURS)
+        if retired:
+            print(f"Retired {retired} Discord job(s) pending longer than {DISCORD_MAX_PENDING_AGE_HOURS}h")
     pending_jobs = storage.get_unnotified()
     if not pending_jobs:
         print("No new or pending jobs to notify about")
         return True
 
-    skipped_jobs = []
-    jobs_to_send = pending_jobs
-    if len(pending_jobs) > MAX_PENDING_JOBS_TO_NOTIFY:
-        skipped_jobs = pending_jobs[:-MAX_PENDING_JOBS_TO_NOTIFY]
-        jobs_to_send = pending_jobs[-MAX_PENDING_JOBS_TO_NOTIFY:]
+    jobs_to_send = pending_jobs[:MAX_PENDING_JOBS_TO_NOTIFY]
+    queued_after = len(pending_jobs) - len(jobs_to_send)
+    if queued_after:
         print(
-            f"Pending backlog has {len(pending_jobs)} job(s); "
-            f"skipping {len(skipped_jobs)} older job(s) and sending the newest "
-            f"{len(jobs_to_send)}"
+            f"Pending backlog has {len(pending_jobs)} job(s); sending the oldest "
+            f"{len(jobs_to_send)} now and keeping {queued_after} pending for later runs"
         )
-        summary_sent = notifier.notify_backlog_skipped(
-            len(skipped_jobs),
-            len(jobs_to_send),
-            dry_run=dry_run,
-        )
-        if not summary_sent:
-            print("Stopped before sending job batches; backlog summary failed")
-            return False
 
     print(f"Sending Discord notifications for {len(jobs_to_send)} pending job(s)...")
     sent_jobs = 0
@@ -182,9 +182,10 @@ def _send_pending_notifications(storage: JobStorage, notifier: DiscordNotifier, 
             total_jobs=len(jobs_to_send),
             batch_index=batch_index,
             dry_run=dry_run,
+            queued_after=queued_after,
         )
         if not sent:
-            remaining = len(jobs_to_send) - sent_jobs
+            remaining = len(pending_jobs) - sent_jobs
             print(
                 f"Stopped after failed batch {batch_index + 1}; "
                 f"{remaining} job(s) remain pending"
@@ -198,12 +199,267 @@ def _send_pending_notifications(storage: JobStorage, notifier: DiscordNotifier, 
     if dry_run:
         print("Dry run complete; pending jobs were not marked as notified")
     else:
-        if skipped_jobs:
-            storage.mark_notified(skipped_jobs)
         print(f"Marked {sent_jobs} job(s) as notified")
-        if skipped_jobs:
-            print(f"Marked {len(skipped_jobs)} skipped older job(s) as handled")
+        if queued_after:
+            print(f"{queued_after} job(s) remain pending for the next run")
     return True
+
+
+def _send_assistant_notifications(
+    storage: JobStorage,
+    assistant: AssistantNotifier,
+    *,
+    dry_run: bool,
+    run_timestamp: str,
+) -> bool:
+    """Deliver pending jobs to the assistant webhook, independently of Discord."""
+    if not dry_run:
+        retired = storage.retire_stale_pending("assistant", ASSISTANT_MAX_PENDING_AGE_HOURS)
+        if retired:
+            print(
+                f"Retired {retired} assistant job(s) pending longer than "
+                f"{ASSISTANT_MAX_PENDING_AGE_HOURS}h"
+            )
+    if not assistant.configured and not dry_run:
+        print("Assistant webhook not configured (ASSISTANT_WEBHOOK_URL); skipping")
+        return True
+
+    pending_jobs = storage.get_pending("assistant")
+    if not pending_jobs:
+        print("No pending jobs for the assistant webhook")
+        return True
+
+    jobs_to_send = pending_jobs[:ASSISTANT_MAX_JOBS_PER_RUN]
+    queued_after = len(pending_jobs) - len(jobs_to_send)
+    batches = assistant.batches(jobs_to_send)
+    print(
+        f"Sending {len(jobs_to_send)} job(s) to the assistant webhook "
+        f"in {len(batches)} batch(es)..."
+    )
+    sent_jobs = 0
+    for batch_index, batch in enumerate(batches):
+        payload = assistant.build_payload(
+            batch,
+            run_timestamp=run_timestamp,
+            batch_index=batch_index,
+            batch_count=len(batches),
+            total_jobs=len(jobs_to_send),
+            pending_after_run=queued_after,
+        )
+        if not assistant.send_payload(payload, dry_run=dry_run):
+            print(
+                f"Assistant batch {batch_index + 1} failed; "
+                f"{len(pending_jobs) - sent_jobs} job(s) remain pending for the assistant"
+            )
+            return False
+        if not dry_run:
+            storage.mark_delivered("assistant", batch)
+        sent_jobs += len(batch)
+
+    if dry_run:
+        print("Dry run complete; assistant jobs were not marked as delivered")
+    else:
+        print(f"Delivered {sent_jobs} job(s) to the assistant webhook")
+    return True
+
+
+def _resolve_scan_plan(args, storage: JobStorage, now: datetime) -> tuple[bool, bool, str]:
+    """Return (scan_lists, scan_careers, description) for this run."""
+    scan_lists = not args.skip_github
+    if args.mode == "fast":
+        return scan_lists, False, "fast (job lists only)"
+    if args.mode == "auto" and not args.skip_careers:
+        last_full = storage.get_meta(META_LAST_FULL_SCAN)
+        due = True
+        if last_full:
+            try:
+                last = datetime.fromisoformat(last_full.replace("Z", "+00:00"))
+                due = now - last >= timedelta(minutes=FULL_SCAN_INTERVAL_MINUTES)
+            except ValueError:
+                due = True
+        if not due:
+            return scan_lists, False, (
+                f"auto: fast (last career scan {last_full}; "
+                f"full scan every {FULL_SCAN_INTERVAL_MINUTES} min)"
+            )
+        return scan_lists, True, "auto: full (career scan due)"
+    scan_careers = not args.skip_careers
+    return scan_lists, scan_careers, "full" if scan_careers else "lists only"
+
+
+def _classify_new_jobs(
+    new_jobs: list[Job],
+    *,
+    baselined_units: set[str],
+    fresh_install: bool,
+    threshold: int,
+    skip_baseline: bool,
+) -> tuple[list[Job], list[Job], dict[str, int]]:
+    """Split new jobs into (to deliver, to record silently as baseline).
+
+    A unit that was never scanned before is baselined when this is a fresh
+    install, or when it suddenly yields more than threshold unseen jobs (a
+    newly added list). Smaller first batches, such as a new company with two
+    open new-grad roles, are delivered normally.
+    """
+    by_unit: dict[str, list[Job]] = defaultdict(list)
+    for job in new_jobs:
+        by_unit[job.unit_key].append(job)
+    deliver, baseline = [], []
+    baselined_counts = {}
+    for unit, jobs in by_unit.items():
+        if (
+            not skip_baseline
+            and unit not in baselined_units
+            and (fresh_install or len(jobs) > threshold)
+        ):
+            baseline.extend(jobs)
+            baselined_counts[unit] = len(jobs)
+        else:
+            deliver.extend(jobs)
+    return deliver, baseline, baselined_counts
+
+
+def _scanned_units(github_tracker, career_scraper) -> set[str]:
+    units = set()
+    if github_tracker is not None:
+        units.update(
+            repo for repo, result in github_tracker.last_repo_results.items()
+            if result.scanned
+        )
+    if career_scraper is not None:
+        units.update(
+            f"careers:{company}"
+            for company, result in career_scraper.last_company_results.items()
+            if result.scanned
+        )
+    return units
+
+
+def _process_scan(
+    storage: JobStorage,
+    all_jobs: list[Job],
+    *,
+    scanned_units: set[str],
+    skip_baseline: bool,
+    summary: dict,
+) -> list[Job]:
+    """Deduplicate, baseline, enrich, screen, and store a scan. Returns jobs queued for delivery."""
+    deduplicated_jobs = _deduplicate_scan_jobs(all_jobs)
+    summary["duplicates_in_scan"] = len(all_jobs) - len(deduplicated_jobs)
+    if summary["duplicates_in_scan"]:
+        print(f"  Removed {summary['duplicates_in_scan']} duplicate listing(s) from this scan")
+    new_jobs, known_jobs = storage.partition_new(deduplicated_jobs)
+    summary["unique"] = len(deduplicated_jobs)
+    summary["flags"] = _flag_counts(deduplicated_jobs)
+    summary["already_known"] = len(known_jobs)
+    summary["new"] = len(new_jobs)
+
+    deliver, baseline, baselined_counts = _classify_new_jobs(
+        new_jobs,
+        baselined_units=storage.baselined_units(),
+        fresh_install=storage.get_meta(META_FRESH_INSTALL) == "1",
+        threshold=NEW_SOURCE_BASELINE_MAX_JOBS,
+        skip_baseline=skip_baseline,
+    )
+    summary["baselined"] = baselined_counts
+
+    if SCREENING["fetch_descriptions"] and deliver:
+        counts = enrich_descriptions(
+            deliver,
+            max_fetches=SCREENING["max_description_fetches_per_run"],
+        )
+        summary["descriptions"] = counts
+        if counts["candidates"]:
+            print(
+                f"  Fetched {counts['fetched']}/{counts['candidates']} job description(s)"
+                f" ({counts['failed']} failed, {counts['skipped']} over the per-run limit)"
+            )
+
+    screened_out: dict[str, list[Job]] = defaultdict(list)
+    queued = []
+    for job in deliver:
+        if job.description_url and job.description:
+            reason = screen_job(job)
+            if reason:
+                screened_out[reason].append(job)
+                continue
+        queued.append(job)
+    summary["screened_after_fetch"] = {reason: len(jobs) for reason, jobs in screened_out.items()}
+
+    storage.add_jobs(
+        baseline,
+        discord_state=SUPPRESSED,
+        assistant_state=SUPPRESSED,
+        suppressed_reason="baseline",
+    )
+    for reason, jobs in screened_out.items():
+        storage.add_jobs(
+            jobs,
+            discord_state=SUPPRESSED,
+            assistant_state=SUPPRESSED,
+            suppressed_reason=f"screened_out:{reason}",
+        )
+    stored = storage.add_jobs(queued, discord_state=PENDING, assistant_state=PENDING)
+    storage.add_jobs(known_jobs)
+    storage.mark_baselined(scanned_units)
+    summary["queued"] = len(stored)
+    return stored
+
+
+def _print_summary(summary: dict):
+    print("\n=== Run summary ===")
+    print(f"Mode: {summary['mode']}")
+    for name, details in summary.get("lists", {}).items():
+        print(
+            f"  List {name}: {details['candidates']} row(s), {details['matched']} matched"
+            f" ({details['status']})"
+        )
+    if "careers" in summary:
+        careers = summary["careers"]
+        print(
+            f"  Career pages: {careers['healthy']}/{careers['attempted']} companies healthy, "
+            f"{careers['matched']} matched"
+        )
+    screened = summary.get("screened_at_source", {})
+    if screened:
+        details = ", ".join(f"{reason}={count}" for reason, count in sorted(screened.items()))
+        print(f"  Dropped by sponsorship/seniority screening at source: {details}")
+    after_fetch = summary.get("screened_after_fetch", {})
+    if after_fetch:
+        details = ", ".join(f"{reason}={count}" for reason, count in sorted(after_fetch.items()))
+        print(f"  Dropped after description fetch: {details}")
+    print(
+        f"  Unique postings this scan: {summary.get('unique', 0)} "
+        f"(already known {summary.get('already_known', 0)}, new {summary.get('new', 0)})"
+    )
+    if summary.get("baselined"):
+        details = ", ".join(f"{unit}={count}" for unit, count in sorted(summary["baselined"].items()))
+        print(f"  Recorded without notifying (first scan of a source): {details}")
+    print(f"  Queued for delivery: {summary.get('queued', 0)}")
+    flags = summary.get("flags")
+    if flags:
+        details = ", ".join(f"{name}={count}" for name, count in sorted(flags.items()))
+        print(f"  Flags on unique matched jobs: {details}")
+
+
+def _flag_counts(jobs: list[Job]) -> dict[str, int]:
+    counts = Counter()
+    for job in jobs:
+        counts[f"sponsorship_{job.sponsorship}"] += 1
+        if job.seniority_flag != "none":
+            counts[f"seniority_{job.seniority_flag}"] += 1
+    return dict(counts)
+
+
+def _save_state(storage: JobStorage, path: Optional[str]):
+    if not path:
+        return
+    pruned = storage.prune(STATE_RETENTION_DAYS)
+    if pruned:
+        print(f"Pruned {pruned} job(s) not listed for {STATE_RETENTION_DAYS} days")
+    save_state_file(path, storage)
+    print(f"Saved durable state to {path}")
 
 
 def main():
@@ -213,7 +469,7 @@ def main():
     parser.add_argument(
         "--notify",
         action="store_true",
-        help="Send Discord notifications for new jobs",
+        help="Send Discord (and assistant webhook, if configured) notifications",
     )
     parser.add_argument(
         "--dry-run",
@@ -224,6 +480,11 @@ def main():
         "--test-webhook",
         action="store_true",
         help="Send a test notification to verify webhook setup",
+    )
+    parser.add_argument(
+        "--test-assistant-webhook",
+        action="store_true",
+        help="Send an empty test payload to ASSISTANT_WEBHOOK_URL",
     )
     parser.add_argument(
         "--stats",
@@ -245,6 +506,31 @@ def main():
         "--skip-careers",
         action="store_true",
         help="Skip career page scraping",
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["full", "fast", "auto"],
+        default="full",
+        help=(
+            "full: lists and career pages; fast: lists only; auto: lists every "
+            f"run, career pages when the last full scan is over "
+            f"{FULL_SCAN_INTERVAL_MINUTES} minutes old"
+        ),
+    )
+    parser.add_argument(
+        "--state-file",
+        metavar="PATH",
+        help="Durable JSON state: loaded before the run (if present) and saved after",
+    )
+    parser.add_argument(
+        "--db",
+        metavar="PATH",
+        help="SQLite working database (default: jobs.db or $JOB_TRACKER_DB)",
+    )
+    parser.add_argument(
+        "--skip-baseline",
+        action="store_true",
+        help="Treat jobs from never-scanned sources as new instead of recording them silently",
     )
     parser.add_argument(
         "--audit-sources",
@@ -288,13 +574,27 @@ def main():
             print(f"Errors: {error}")
         return
 
-    storage = JobStorage()
     notifier = DiscordNotifier()
+    assistant = AssistantNotifier()
 
     # Handle special commands
     if args.test_webhook:
         success = notifier.send_test(dry_run=args.dry_run)
         sys.exit(0 if success else 1)
+
+    if args.test_assistant_webhook:
+        success = assistant.send_test(dry_run=args.dry_run)
+        sys.exit(0 if success else 1)
+
+    storage = JobStorage(args.db) if args.db else JobStorage()
+    if args.state_file:
+        if load_state_file(args.state_file, storage):
+            print(f"Loaded durable state from {args.state_file}")
+        else:
+            print(
+                f"No state file at {args.state_file}; continuing from the local "
+                "database (it will be created after this run)"
+            )
 
     if args.stats:
         stats = storage.get_stats()
@@ -302,6 +602,11 @@ def main():
         print(f"Total jobs tracked: {stats['total_jobs']}")
         print(f"Jobs notified: {stats['notified_jobs']}")
         print(f"Pending notification: {stats['pending_notification']}")
+        print(f"Recorded without notifying: {stats['suppressed_jobs']}")
+        print(
+            f"Assistant webhook: {stats['assistant_delivered']} delivered, "
+            f"{stats['assistant_pending']} pending, {stats['assistant_suppressed']} not sent"
+        )
         print(
             "Oldest pending age: "
             f"{_format_age_hours(stats['oldest_unnotified_age_hours'])}"
@@ -328,34 +633,63 @@ def main():
 
     if args.list_recent is not None:
         jobs = storage.get_recent(args.list_recent)
+        labels = {0: "Pending", 1: "Notified", 2: "Not sent"}
         print(f"\n=== {len(jobs)} Most Recent Jobs ===\n")
         for job in jobs:
-            status = "Notified" if job["notified"] else "Pending"
+            status = labels.get(job["notified"], "Unknown")
             print(f"[{status}] {job['company']} - {job['title']}")
             print(f"         Location: {job['location'] or 'N/A'}")
             print(f"         URL: {job['url']}")
             print(f"         Seen: {job['first_seen']}")
+            print(
+                f"         Sponsorship: {job['sponsorship']}; "
+                f"seniority: {job['seniority_flag']}"
+            )
+            if job["suppressed_reason"]:
+                print(f"         Note: {job['suppressed_reason']}")
             print()
         return
 
-    # Main job tracking flow
+    delivered_ok = True
+    try:
+        delivered_ok = _run_tracker(args, storage, notifier, assistant)
+    finally:
+        _save_state(storage, args.state_file)
+    if not delivered_ok:
+        sys.exit(1)
+
+
+def _run_tracker(args, storage: JobStorage, notifier: DiscordNotifier, assistant: AssistantNotifier) -> bool:
+    """Scan, store, and deliver. Returns False if any delivery channel failed."""
     print("=== Job Tracker ===\n")
+    now = _utc_now()
+    run_timestamp = _iso(now)
+    scan_lists, scan_careers, mode_description = _resolve_scan_plan(args, storage, now)
+    print(f"Mode: {mode_description}\n")
+    summary: dict = {"mode": mode_description, "lists": {}, "screened_at_source": Counter()}
 
     all_jobs = []
     source_statuses = []
     company_results = {}
+    github_tracker = None
+    career_scraper = None
 
-    # Fetch from GitHub repos
-    if not args.skip_github:
+    if scan_lists:
         print("Fetching from GitHub repositories...")
         github_tracker = GitHubTracker()
         github_jobs, github_healthy, github_error = github_tracker.fetch_jobs_with_status()
         print(f"  Found {len(github_jobs)} matching jobs from GitHub\n")
         all_jobs.extend(github_jobs)
         source_statuses.append(("github", github_healthy, github_error))
+        summary["screened_at_source"].update(github_tracker.screen_counts)
+        for repo, result in github_tracker.last_repo_results.items():
+            summary["lists"][repo] = {
+                "candidates": result.candidate_count,
+                "matched": len(result.jobs),
+                "status": result.status,
+            }
 
-    # Fetch from career pages
-    if not args.skip_careers:
+    if scan_careers:
         print("Scraping career pages...")
         career_scraper = CareerScraper()
         career_jobs, careers_healthy, careers_error = career_scraper.fetch_jobs_with_status()
@@ -363,6 +697,13 @@ def main():
         all_jobs.extend(career_jobs)
         source_statuses.append(("careers", careers_healthy, careers_error))
         company_results = career_scraper.last_company_results
+        summary["screened_at_source"].update(career_scraper.screen_counts)
+        summary["careers"] = {
+            "attempted": career_scraper.last_attempted_companies,
+            "healthy": career_scraper.last_successful_companies,
+            "matched": len(career_jobs),
+        }
+        storage.set_meta(META_LAST_FULL_SCAN, run_timestamp)
 
     _update_source_health(
         storage,
@@ -380,21 +721,22 @@ def main():
             dry_run=args.dry_run,
         )
 
-    # Check for new jobs. Prefer direct career records when the repository
-    # lists the same apply URL with tracking parameters.
     print("Checking for new jobs...")
-    deduplicated_jobs = _deduplicate_scan_jobs(all_jobs)
-    duplicate_count = len(all_jobs) - len(deduplicated_jobs)
-    if duplicate_count:
-        print(f"  Removed {duplicate_count} duplicate listing(s) from this scan")
-    new_jobs = storage.add_jobs(deduplicated_jobs)
+    new_jobs = _process_scan(
+        storage,
+        all_jobs,
+        scanned_units=_scanned_units(github_tracker, career_scraper),
+        skip_baseline=args.skip_baseline,
+        summary=summary,
+    )
+    if scan_lists and scan_careers:
+        storage.set_meta(META_FRESH_INSTALL, None)
 
     print(
-        f"\nFound {len(new_jobs)} new job(s) out of "
-        f"{len(deduplicated_jobs)} unique total\n"
+        f"\nFound {len(new_jobs)} new job(s) to deliver out of "
+        f"{summary.get('unique', 0)} unique total\n"
     )
 
-    # Print all new jobs
     if new_jobs:
         print("=== New Jobs ===\n")
         for job in new_jobs:
@@ -402,17 +744,27 @@ def main():
             print(f"  Location: {job.location or 'Not specified'}")
             print(f"  Apply: {job.url}")
             print(f"  Source: {job.source}")
+            print(f"  Sponsorship: {job.sponsorship}; seniority: {job.seniority_flag}")
             print()
 
-    # Send notifications if requested
-    if args.notify:
-        notifications_sent = _send_pending_notifications(
-            storage,
-            notifier,
-            dry_run=args.dry_run,
-        )
-        if not notifications_sent:
-            sys.exit(1)
+    _print_summary(summary)
+
+    if not args.notify:
+        return True
+    print()
+    assistant_ok = _send_assistant_notifications(
+        storage,
+        assistant,
+        dry_run=args.dry_run,
+        run_timestamp=run_timestamp,
+    )
+    print()
+    discord_ok = _send_pending_notifications(
+        storage,
+        notifier,
+        dry_run=args.dry_run,
+    )
+    return assistant_ok and discord_ok
 
 
 if __name__ == "__main__":

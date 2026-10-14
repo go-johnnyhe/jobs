@@ -30,29 +30,18 @@ class FakeStorage:
 
 
 class FakeNotifier:
-    def __init__(self, batch_results, summary_result=True):
+    def __init__(self, batch_results):
         self.batch_results = list(batch_results)
-        self.summary_result = summary_result
         self.calls = []
-        self.summary_calls = []
 
-    def notify_backlog_skipped(self, skipped_count, sent_count, dry_run):
-        self.summary_calls.append(
-            {
-                "skipped_count": skipped_count,
-                "sent_count": sent_count,
-                "dry_run": dry_run,
-            }
-        )
-        return self.summary_result
-
-    def send_job_batch(self, jobs, *, total_jobs, batch_index, dry_run):
+    def send_job_batch(self, jobs, *, total_jobs, batch_index, dry_run, queued_after=0):
         self.calls.append(
             {
                 "ids": [job["unique_id"] for job in jobs],
                 "total_jobs": total_jobs,
                 "batch_index": batch_index,
                 "dry_run": dry_run,
+                "queued_after": queued_after,
             }
         )
         return self.batch_results[batch_index]
@@ -146,7 +135,7 @@ def test_failed_later_batch_leaves_unsent_jobs_pending():
     assert storage.marked == [job["unique_id"] for job in pending_jobs[:10]]
 
 
-def test_large_backlog_sends_summary_and_newest_jobs_only():
+def test_large_backlog_sends_oldest_jobs_and_keeps_the_rest_pending():
     backlog_size = main.MAX_PENDING_JOBS_TO_NOTIFY + 5
     pending_jobs = [_make_pending_job(index) for index in range(backlog_size)]
     storage = FakeStorage(pending_jobs)
@@ -157,42 +146,39 @@ def test_large_backlog_sends_summary_and_newest_jobs_only():
     success = main._send_pending_notifications(storage, notifier, dry_run=False)
 
     assert success is True
-    assert notifier.summary_calls == [
-        {
-            "skipped_count": 5,
-            "sent_count": main.MAX_PENDING_JOBS_TO_NOTIFY,
-            "dry_run": False,
-        }
-    ]
     sent_ids = [job_id for call in notifier.calls for job_id in call["ids"]]
-    assert sent_ids == [f"job-{index}" for index in range(5, backlog_size)]
-    assert storage.marked == [
-        *[f"job-{index}" for index in range(5, backlog_size)],
-        *[f"job-{index}" for index in range(5)],
+    assert sent_ids == [f"job-{index}" for index in range(main.MAX_PENDING_JOBS_TO_NOTIFY)]
+    assert {call["queued_after"] for call in notifier.calls} == {5}
+    assert {call["total_jobs"] for call in notifier.calls} == {main.MAX_PENDING_JOBS_TO_NOTIFY}
+    # Only sent jobs are marked; the 5 newest stay pending for the next run.
+    assert storage.marked == sent_ids
+
+
+def test_large_backlog_drains_over_successive_runs_without_skipping(tmp_path):
+    storage = JobStorage(str(tmp_path / "test.db"))
+    jobs = [
+        Job("Acme", "Software Engineer", f"https://example.com/{i}", "Seattle, WA", "test")
+        for i in range(main.MAX_PENDING_JOBS_TO_NOTIFY + 12)
     ]
+    storage.add_jobs(jobs)
+    batches_per_run = (main.MAX_PENDING_JOBS_TO_NOTIFY + 9) // 10
 
+    first = FakeNotifier([True] * batches_per_run)
+    assert main._send_pending_notifications(storage, first, dry_run=False)
+    assert len(storage.get_unnotified()) == 12
 
-def test_large_backlog_keeps_pending_if_summary_fails():
-    backlog_size = main.MAX_PENDING_JOBS_TO_NOTIFY + 5
-    pending_jobs = [_make_pending_job(index) for index in range(backlog_size)]
-    storage = FakeStorage(pending_jobs)
-    notifier = FakeNotifier([True, True], summary_result=False)
-
-    success = main._send_pending_notifications(storage, notifier, dry_run=False)
-
-    assert success is False
-    assert notifier.summary_calls == [
-        {
-            "skipped_count": 5,
-            "sent_count": main.MAX_PENDING_JOBS_TO_NOTIFY,
-            "dry_run": False,
-        }
+    second = FakeNotifier([True] * batches_per_run)
+    assert main._send_pending_notifications(storage, second, dry_run=False)
+    assert storage.get_unnotified() == []
+    delivered = [
+        job_id for notifier in (first, second)
+        for call in notifier.calls for job_id in call["ids"]
     ]
-    assert notifier.calls == []
-    assert storage.marked == []
+    assert delivered == [job.unique_id for job in jobs]
+    assert storage.get_stats()["notified_jobs"] == len(jobs)
 
 
-def test_large_backlog_keeps_skipped_pending_if_job_batch_fails():
+def test_large_backlog_keeps_unsent_pending_if_job_batch_fails():
     backlog_size = main.MAX_PENDING_JOBS_TO_NOTIFY + 5
     pending_jobs = [_make_pending_job(index) for index in range(backlog_size)]
     storage = FakeStorage(pending_jobs)
@@ -202,10 +188,10 @@ def test_large_backlog_keeps_skipped_pending_if_job_batch_fails():
 
     assert success is False
     assert [call["ids"] for call in notifier.calls] == [
-        [f"job-{index}" for index in range(5, 15)],
-        [f"job-{index}" for index in range(15, 25)],
+        [f"job-{index}" for index in range(0, 10)],
+        [f"job-{index}" for index in range(10, 20)],
     ]
-    assert storage.marked == [f"job-{index}" for index in range(5, 15)]
+    assert storage.marked == [f"job-{index}" for index in range(0, 10)]
 
 
 def test_no_pending_notifications_succeeds():
@@ -296,7 +282,7 @@ def test_dry_run_keeps_all_pending_jobs():
     notifier = FakeNotifier([True] * 5)
     assert main._send_pending_notifications(storage, notifier, dry_run=True)
     assert storage.marked == []
-    assert all(call["dry_run"] for call in notifier.calls + notifier.summary_calls)
+    assert all(call["dry_run"] for call in notifier.calls)
 
 
 def test_list_recent_zero_does_not_scrape(monkeypatch, tmp_path):

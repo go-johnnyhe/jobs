@@ -35,6 +35,7 @@ class DiscordNotifier:
         total_jobs: Optional[int] = None,
         batch_index: int = 0,
         dry_run: bool = False,
+        queued_after: int = 0,
     ) -> bool:
         """Send a single Discord message containing up to 10 job embeds."""
         if not jobs:
@@ -49,6 +50,7 @@ class DiscordNotifier:
             jobs,
             total_jobs=total_jobs or len(jobs),
             batch_index=batch_index,
+            queued_after=queued_after,
         )
 
         if dry_run:
@@ -69,42 +71,6 @@ class DiscordNotifier:
             return True
         except requests.RequestException as e:
             print(f"Error sending Discord notification batch {batch_index + 1}: {e}")
-            return False
-
-    def notify_backlog_skipped(
-        self,
-        skipped_count: int,
-        sent_count: int,
-        dry_run: bool = False,
-    ) -> bool:
-        """Send a summary when an old notification backlog is intentionally skipped."""
-        payload = {
-            "content": self._truncate(
-                "Job Tracker recovered from a notification backlog. "
-                f"Skipped {skipped_count} older pending job(s) and will send "
-                f"the newest {sent_count} pending job(s).",
-                MAX_CONTENT_CHARS,
-            )
-        }
-
-        if dry_run:
-            print("Dry run - would send backlog summary:")
-            print(json.dumps(payload, indent=2))
-            return True
-
-        if not self.webhook_url:
-            print("No Discord webhook URL configured")
-            return False
-
-        try:
-            self._send_payload(payload)
-            print(
-                f"Sent backlog summary; skipped {skipped_count} older "
-                f"pending job(s)"
-            )
-            return True
-        except requests.RequestException as e:
-            print(f"Error sending backlog summary: {e}")
             return False
 
     def notify_source_failure(
@@ -269,11 +235,16 @@ class DiscordNotifier:
         *,
         total_jobs: int,
         batch_index: int,
+        queued_after: int = 0,
     ) -> dict:
         """Build the payload for a single job-notification batch."""
         embeds = [self._build_embed(job) for job in jobs]
         if batch_index == 0:
             content = f"**New Job Alert!** Sending {len(jobs)} of {total_jobs} position(s)"
+            if queued_after:
+                content += (
+                    f" ({queued_after} more queued; they will be sent in the next run(s))"
+                )
         else:
             content = (
                 f"(continued) Sending batch {batch_index + 1} "
@@ -294,12 +265,18 @@ class DiscordNotifier:
             url = job.url
             location = job.location or "Not specified"
             source = job.source
+            sponsorship = job.sponsorship
+            seniority_flag = job.seniority_flag
+            min_years = job.min_years_experience
         else:
             company = job.get("company", "Unknown")
             title = job.get("title", "Unknown")
             url = job.get("url", "")
             location = job.get("location", "") or "Not specified"
             source = job.get("source", "")
+            sponsorship = job.get("sponsorship") or "unknown"
+            seniority_flag = job.get("seniority_flag") or "none"
+            min_years = job.get("min_years_experience")
 
         if source == "career_page":
             source = "Company career page"
@@ -332,11 +309,35 @@ class DiscordNotifier:
                 },
             ],
         }
+        screening = self._screening_summary(sponsorship, seniority_flag, min_years)
+        if screening:
+            embed["fields"].append({
+                "name": "Screening",
+                "value": self._truncate(screening, MAX_JOB_FIELD_VALUE_CHARS),
+                "inline": False,
+            })
         safe_url = self._safe_embed_url(url)
         if safe_url:
             embed["url"] = safe_url
 
         return embed
+
+    def _screening_summary(
+        self,
+        sponsorship: str,
+        seniority_flag: str,
+        min_years: Optional[int],
+    ) -> str:
+        """Describe notable screening flags; empty when there is nothing to report."""
+        parts = []
+        if sponsorship == "yes":
+            parts.append("Visa sponsorship mentioned")
+        elif sponsorship == "no":
+            parts.append("May not sponsor visas")
+        if seniority_flag in {"borderline", "senior"}:
+            years = f"{min_years}+ years" if min_years else "experience"
+            parts.append(f"Asks for {years} ({seniority_flag})")
+        return " | ".join(parts)
 
     def _safe_embed_url(self, url: str) -> Optional[str]:
         """Return a Discord-safe embed URL, or None if it should be omitted."""
