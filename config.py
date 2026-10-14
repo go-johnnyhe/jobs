@@ -708,12 +708,17 @@ CAREER_CONTENT_EXCLUSIONS = [
 # Location preferences (empty list = all locations)
 PREFERRED_LOCATIONS = [
     "seattle",
+    "bellevue",
+    "redmond",
+    "kirkland",
     "remote",
     "united states",
     "usa",
     "us",
     "san francisco",
+    "sf",
     "new york",
+    "nyc",
     "mountain view",
     "palo alto",
     "sunnyvale",

@@ -100,6 +100,8 @@ def _row_from_cells(
 def _html_cell(td) -> dict:
     for summary in td.find_all("summary"):
         summary.decompose()
+    for br in td.find_all("br"):
+        br.replace_with("\n")
     lines = [
         line.strip()
         for line in td.get_text("\n", strip=True).split("\n")
@@ -134,19 +136,16 @@ def _markdown_cell(raw: str) -> dict:
     raw = raw.strip().replace("\\|", "|")
     links = [m.group(2) for m in _MARKDOWN_LINK_RE.finditer(raw)]
     if "<" in raw:
-        soup = BeautifulSoup(raw, "html.parser")
+        # html.parser drops "</br>" (used by the lists), so split lines first.
+        soup = BeautifulSoup(_LOCATION_SPLIT_RE.sub("\n", raw), "html.parser")
         links += [a["href"].strip() for a in soup.find_all("a", href=True)]
         for summary in soup.find_all("summary"):
             summary.decompose()
         lines = [
-            line.strip()
-            for line in _LOCATION_SPLIT_RE.split(str(soup))
+            " ".join(line.split())
+            for line in soup.get_text("", strip=False).split("\n")
         ]
-        lines = [
-            BeautifulSoup(line, "html.parser").get_text(" ", strip=True)
-            for line in lines
-        ]
-        text = soup.get_text(" ", strip=True)
+        text = " ".join(soup.get_text(" ", strip=True).split())
     else:
         text = raw
         lines = [raw]
