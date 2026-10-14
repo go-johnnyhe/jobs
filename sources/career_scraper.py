@@ -1,9 +1,11 @@
 """Direct career page scraper for job listings."""
 
+from collections import Counter
 import concurrent.futures
 from datetime import datetime, timezone
 import json
 import re
+import threading
 from typing import Optional
 from urllib.parse import parse_qs, urljoin, urlparse
 from xml.etree import ElementTree
@@ -23,6 +25,7 @@ from config import (
 from filters import has_role_keyword, matches_job_criteria
 from http_client import create_session
 from models import Job, ScrapeResult
+from screening import html_to_text, screen_job
 
 
 _ENTRY_LEVEL_RE = re.compile(
@@ -43,6 +46,8 @@ class CareerScraper:
         self.last_attempted_companies = 0
         self.last_successful_companies = 0
         self.last_company_results: dict[str, ScrapeResult] = {}
+        self.screen_counts: Counter = Counter()
+        self._screen_lock = threading.Lock()
         headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -57,6 +62,7 @@ class CareerScraper:
         self.last_attempted_companies = 0
         self.last_successful_companies = 0
         self.last_company_results = {}
+        self.screen_counts = Counter()
 
         company_items = list(COMPANIES.items())
         with concurrent.futures.ThreadPoolExecutor(
@@ -226,7 +232,11 @@ class CareerScraper:
             elif ats == "optiver":
                 return self._scrape_optiver(company_name)
             elif ats == "workday":
-                return self._scrape_workday(company_name, url)
+                return self._scrape_workday(
+                    company_name,
+                    url,
+                    search_queries=config.get("search_queries"),
+                )
             return self._scrape_generic(company_name, url)
         except Exception as e:
             return ScrapeResult(
@@ -362,6 +372,10 @@ class CareerScraper:
             url=url,
             location=location,
             source="career_page",
+            date_posted=job_data.get("first_published"),
+            description_url=(
+                f"https://boards-api.greenhouse.io/v1/boards/{board_id}/jobs/{job_id}"
+            ),
         )
 
     def _scrape_lever(
@@ -466,6 +480,10 @@ class CareerScraper:
             location=location,
             source="career_page",
             date_posted=job_data.get("publishedAt"),
+            description=(
+                job_data.get("descriptionPlain")
+                or html_to_text(job_data.get("descriptionHtml", ""))
+            ),
         )
 
     def _scrape_amazon(
@@ -2124,12 +2142,32 @@ class CareerScraper:
         if not title or not url:
             return None
 
+        description_parts = [
+            job_data.get("descriptionPlain") or html_to_text(job_data.get("description", "")),
+        ]
+        for section in job_data.get("lists") or []:
+            if isinstance(section, dict):
+                description_parts.append(str(section.get("text") or ""))
+                description_parts.append(html_to_text(section.get("content", "")))
+        description_parts.append(
+            job_data.get("additionalPlain") or html_to_text(job_data.get("additional", ""))
+        )
+
+        created_at = job_data.get("createdAt")
+        date_posted = None
+        if isinstance(created_at, (int, float)):
+            date_posted = datetime.fromtimestamp(
+                created_at / 1000, tz=timezone.utc,
+            ).date().isoformat()
+
         return Job(
             company=company_name,
             title=title,
             url=url,
             location=location,
             source="career_page",
+            date_posted=date_posted,
+            description="\n".join(part for part in description_parts if part),
         )
 
     def _scrape_google(self, company_name: str, url: str) -> ScrapeResult:
@@ -2653,12 +2691,17 @@ class CareerScraper:
                 error=request_error,
             )
 
-    def _scrape_workday(self, company_name: str, url: str) -> ScrapeResult:
-        """Scrape jobs from Workday-powered career pages (CXS API)."""
-        postings_by_url = {}
-        records_seen = 0
-        records_without_url = 0
+    def _scrape_workday(
+        self,
+        company_name: str,
+        url: str,
+        search_queries: Optional[list[str]] = None,
+    ) -> ScrapeResult:
+        """Scrape jobs from Workday-powered career pages (CXS API).
 
+        Without search_queries the whole feed is scanned. With them, each query
+        is paginated and coverage-checked separately and the results merged.
+        """
         tenant_site = self._extract_workday_tenant_site(url)
         if not tenant_site:
             return ScrapeResult(
@@ -2667,8 +2710,55 @@ class CareerScraper:
             )
 
         tenant, site, base = tenant_site
-        api_url = f"{base}/wday/cxs/{tenant}/{site}/jobs"
+        cxs_base = f"{base}/wday/cxs/{tenant}/{site}"
+        api_url = f"{cxs_base}/jobs"
         detail_base = url.split("?", 1)[0].rstrip("/") + "/"
+
+        postings_by_url = {}
+        queries = search_queries or [None]
+        expected_total = 0
+        for query in queries:
+            query_result = self._fetch_workday_postings(company_name, api_url, query)
+            if isinstance(query_result, ScrapeResult):
+                return query_result
+            query_postings, query_total = query_result
+            postings_by_url.update(query_postings)
+            expected_total = query_total
+        if len(queries) > 1:
+            expected_total = len(postings_by_url)
+
+        jobs = []
+        parsed_count = 0
+        for posting in postings_by_url.values():
+            job = self._parse_workday_job(
+                company_name, posting, detail_base, cxs_base=cxs_base,
+            )
+            if not job:
+                continue
+            parsed_count += 1
+            if self._matches_criteria(job):
+                jobs.append(job)
+        if expected_total and parsed_count * 100 < expected_total * 98:
+            return ScrapeResult(
+                status="parse_failure",
+                candidate_count=parsed_count,
+                error=(
+                    f"{company_name} ({api_url}): parsed "
+                    f"{parsed_count}/{expected_total} complete Workday jobs"
+                ),
+            )
+        return self._success_result(jobs, parsed_count)
+
+    def _fetch_workday_postings(
+        self,
+        company_name: str,
+        api_url: str,
+        search_text: Optional[str],
+    ) -> "tuple[dict[str, dict], int] | ScrapeResult":
+        """Page through one Workday CXS search; return (postings by URL, total) or a failure."""
+        postings_by_url = {}
+        records_seen = 0
+        records_without_url = 0
 
         # Most tenants accept 100, which avoids dozens of requests. A few
         # enforce a smaller page size, so retry the first page at 20 on 400.
@@ -2681,6 +2771,8 @@ class CareerScraper:
                 "limit": limit,
                 "offset": offset,
             }
+            if search_text:
+                payload["searchText"] = search_text
 
             try:
                 response = self.session.post(
@@ -2766,26 +2858,7 @@ class CareerScraper:
                     f" ({records_without_url} missing URL)"
                 ),
             )
-
-        jobs = []
-        parsed_count = 0
-        for posting in postings_by_url.values():
-            job = self._parse_workday_job(company_name, posting, detail_base)
-            if not job:
-                continue
-            parsed_count += 1
-            if self._matches_criteria(job):
-                jobs.append(job)
-        if total and parsed_count * 100 < total * 98:
-            return ScrapeResult(
-                status="parse_failure",
-                candidate_count=parsed_count,
-                error=(
-                    f"{company_name} ({api_url}): parsed "
-                    f"{parsed_count}/{total} complete Workday jobs"
-                ),
-            )
-        return self._success_result(jobs, parsed_count)
+        return postings_by_url, total or 0
 
     def _extract_workday_tenant_site(self, url: str) -> Optional[tuple[str, str, str]]:
         """Extract Workday tenant and site from a Workday jobs URL."""
@@ -2815,7 +2888,13 @@ class CareerScraper:
         except Exception:
             return None
 
-    def _parse_workday_job(self, company_name: str, posting: dict, base_url: str) -> Optional[Job]:
+    def _parse_workday_job(
+        self,
+        company_name: str,
+        posting: dict,
+        base_url: str,
+        cxs_base: str = "",
+    ) -> Optional[Job]:
         """Parse a Workday job posting from CXS API."""
         title = posting.get("title") or posting.get("jobTitle") or ""
         url_path = posting.get("externalPath") or posting.get("externalUrl") or ""
@@ -2834,12 +2913,18 @@ class CareerScraper:
         else:
             url = urljoin(base_url, url_path.lstrip("/"))
 
+        description_url = ""
+        if cxs_base and url_path.startswith("/"):
+            description_url = f"{cxs_base}{url_path}"
+
         return Job(
             company=company_name,
             title=title,
             url=url,
             location=location,
             source="career_page",
+            date_posted=posting.get("postedOn"),
+            description_url=description_url,
         )
 
     def _looks_like_job_link(self, href: str, text: str) -> bool:
@@ -2900,7 +2985,14 @@ class CareerScraper:
             return False
         if not explicit_entry_level and not _ENTRY_LEVEL_RE.search(title_lower):
             return False
-        return matches_job_criteria(job, require_location=True)
+        if not matches_job_criteria(job, require_location=True):
+            return False
+        drop_reason = screen_job(job)
+        if drop_reason:
+            with self._screen_lock:
+                self.screen_counts[drop_reason] += 1
+            return False
+        return True
 
     def _is_career_content_page(self, href_lower: str, text_lower: str) -> bool:
         """Reject career-site articles, stories, and other non-opening content."""
