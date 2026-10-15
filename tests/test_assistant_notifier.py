@@ -242,6 +242,42 @@ def test_retries_connection_errors():
     assert sleeps == [0.5]
 
 
+SECRET = "s3cr3t-token-value"
+
+
+@pytest.mark.parametrize("status", [404, 503])
+def test_logs_never_include_the_url_or_response_body(server, capsys, status):
+    server.responses = [(status, {}, f"no hook at /hooks/{SECRET}?token={SECRET}")] * 2
+    notifier = make_notifier(f"{server.url}/{SECRET}?token={SECRET}", max_attempts=2)
+    result = notifier.deliver(build(notifier, [stored_row()]))
+    assert (result.ok, result.status) == (False, status)
+    out = capsys.readouterr().out
+    assert f"HTTP {status}" in out
+    assert SECRET not in out
+    assert "127.0.0.1" not in out
+
+
+def test_connection_error_logs_only_the_exception_type(capsys):
+    with WebhookServer() as webhook:
+        url = f"{webhook.url}/{SECRET}?token={SECRET}"
+    notifier = make_notifier(url, max_attempts=2, backoff_seconds=0)
+    result = notifier.deliver(build(notifier, [stored_row()]))
+    assert (result.ok, result.status) == (False, None)
+    out = capsys.readouterr().out
+    assert "ConnectionError" in out
+    assert SECRET not in out
+    assert "127.0.0.1" not in out
+
+
+@pytest.mark.parametrize(("status", "content_rejected"), [
+    (400, True), (413, True), (422, True), (401, False), (404, False), (503, False),
+])
+def test_content_rejections_are_distinguished_from_endpoint_errors(server, status, content_rejected):
+    server.responses = [(status, {}, "")]
+    notifier = make_notifier(server.url, max_attempts=1)
+    assert notifier.deliver(build(notifier, [stored_row()])).content_rejected is content_rejected
+
+
 def test_unconfigured_notifier_sends_nothing(monkeypatch):
     def fail(*_args, **_kwargs):
         raise AssertionError("must not POST")

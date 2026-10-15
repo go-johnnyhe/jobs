@@ -1,5 +1,6 @@
 """JSON webhook delivery of new jobs to Johnny's AI assistant."""
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -19,12 +20,25 @@ from config import (
     ASSISTANT_WEBHOOK_URL,
     LIST_MARKERS,
 )
-from http_client import create_session
+from http_client import create_session, describe_request_error
 from models import Job
 from posted_dates import normalize_posted_date
 
 PAYLOAD_SCHEMA = "job-tracker.new-jobs.v1"
 RETRYABLE_STATUS = {408, 429, 500, 502, 503, 504}
+# Statuses that reject the content of a batch rather than the request itself
+# (auth, URL, method). Rejected batches are split to isolate the bad job.
+CONTENT_REJECTED_STATUS = {400, 413, 422}
+
+
+@dataclass(frozen=True)
+class DeliveryResult:
+    ok: bool
+    status: Optional[int] = None
+
+    @property
+    def content_rejected(self) -> bool:
+        return not self.ok and self.status in CONTENT_REJECTED_STATUS
 _DISPLAY_MARKERS = tuple(LIST_MARKERS) + ("🔥", "🔒")
 
 
@@ -180,16 +194,24 @@ class AssistantNotifier:
         ]
 
     def send_payload(self, payload: dict, *, dry_run: bool = False) -> bool:
-        """POST one payload, retrying transient failures with exponential backoff."""
+        return self.deliver(payload, dry_run=dry_run).ok
+
+    def deliver(self, payload: dict, *, dry_run: bool = False) -> "DeliveryResult":
+        """POST one payload, retrying transient failures with exponential backoff.
+
+        Logs show only the exception type and HTTP status: exception messages
+        contain the URL, and response bodies may echo request details.
+        """
         if dry_run:
             print("Dry run - would send assistant webhook payload:")
             print(json.dumps(payload, indent=2, ensure_ascii=False))
-            return True
+            return DeliveryResult(ok=True)
         if not self.configured:
-            return False
+            return DeliveryResult(ok=False)
 
         idempotency_key = payload.get("batch", {}).get("id") or payload.get("event", "")
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        status = None
         for attempt in range(1, self.max_attempts + 1):
             delay = self.backoff_seconds * (2 ** (attempt - 1))
             try:
@@ -200,23 +222,25 @@ class AssistantNotifier:
                     timeout=self.timeout,
                 )
             except requests.RequestException as exc:
-                error = f"{type(exc).__name__}: {exc}"
+                status = None
+                error = describe_request_error(exc)
             else:
-                if 200 <= response.status_code < 300:
-                    return True
-                error = f"HTTP {response.status_code}: {response.text.strip()[:300]}"
-                if response.status_code not in RETRYABLE_STATUS:
+                status = response.status_code
+                if 200 <= status < 300:
+                    return DeliveryResult(ok=True, status=status)
+                error = f"HTTP {status}"
+                if status not in RETRYABLE_STATUS:
                     print(f"Assistant webhook rejected batch (not retrying): {error}")
-                    return False
+                    return DeliveryResult(ok=False, status=status)
                 retry_after = self._retry_after(response)
                 if retry_after is not None:
                     delay = retry_after
             if attempt == self.max_attempts:
                 print(f"Assistant webhook failed after {attempt} attempt(s): {error}")
-                return False
+                return DeliveryResult(ok=False, status=status)
             print(f"Assistant webhook attempt {attempt} failed ({error}); retrying in {delay:.1f}s")
             self.sleep(delay)
-        return False
+        return DeliveryResult(ok=False, status=status)
 
     def _retry_after(self, response) -> Optional[float]:
         value = response.headers.get("Retry-After")

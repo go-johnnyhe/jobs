@@ -33,3 +33,14 @@ def create_session(
     session.mount("https://", adapter)
     session.mount("http://", adapter)
     return session
+
+
+def describe_request_error(exc: BaseException) -> str:
+    """Exception type and HTTP status, safe to print in public CI logs.
+
+    requests exception messages include the request URL, and webhook URLs
+    carry their secret in the path or query string.
+    """
+    status = getattr(getattr(exc, "response", None), "status_code", None)
+    name = type(exc).__name__
+    return f"{name} (HTTP {status})" if status else name

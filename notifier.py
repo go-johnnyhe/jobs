@@ -6,7 +6,7 @@ from typing import Optional
 import requests
 
 from config import DISCORD_WEBHOOK_URL
-from http_client import create_session
+from http_client import create_session, describe_request_error
 
 MAX_EMBEDS_PER_MESSAGE = 10
 MAX_CONTENT_CHARS = 2000
@@ -15,7 +15,6 @@ MAX_EMBED_URL_CHARS = 2048
 MAX_JOB_FIELD_VALUE_CHARS = 220
 MAX_SOURCE_FIELD_VALUE_CHARS = 80
 MAX_ERROR_FIELD_VALUE_CHARS = 1024
-MAX_ERROR_BODY_CHARS = 500
 
 
 class DiscordNotifier:
@@ -70,7 +69,7 @@ class DiscordNotifier:
             )
             return True
         except requests.RequestException as e:
-            print(f"Error sending Discord notification batch {batch_index + 1}: {e}")
+            print(f"Error sending Discord notification batch {batch_index + 1}: {describe_request_error(e)}")
             return False
 
     def notify_source_failure(
@@ -162,7 +161,7 @@ class DiscordNotifier:
             )
             return True
         except requests.RequestException as e:
-            print(f"Error sending {subject_type.lower()} failure alert: {e}")
+            print(f"Error sending {subject_type.lower()} failure alert: {describe_request_error(e)}")
             return False
 
     def notify_source_recovery(
@@ -208,7 +207,7 @@ class DiscordNotifier:
             print(f"Sent source recovery alert for {source}")
             return True
         except requests.RequestException as e:
-            print(f"Error sending source recovery alert: {e}")
+            print(f"Error sending source recovery alert: {describe_request_error(e)}")
             return False
 
     def _send_payload(self, payload: dict):
@@ -218,16 +217,7 @@ class DiscordNotifier:
             json=payload,
             timeout=30,
         )
-        try:
-            response.raise_for_status()
-        except requests.HTTPError as exc:
-            body = response.text.strip()
-            if body:
-                raise requests.HTTPError(
-                    f"{exc}; response body: {body[:MAX_ERROR_BODY_CHARS]}",
-                    response=response,
-                ) from exc
-            raise
+        response.raise_for_status()
 
     def _build_job_batch_payload(
         self,
@@ -413,5 +403,5 @@ class DiscordNotifier:
             print("Test notification sent successfully!")
             return True
         except requests.RequestException as e:
-            print(f"Error sending test notification: {e}")
+            print(f"Error sending test notification: {describe_request_error(e)}")
             return False
