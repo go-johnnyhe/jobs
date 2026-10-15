@@ -219,9 +219,9 @@ commit.
   Google) or canonical URL plus title, and is sent once.
 - The first scan of a new source with more than `NEW_SOURCE_BASELINE_MAX_JOBS`
   (5) unseen jobs is recorded without notifying, so adding a list does not
-  flood Discord. Jobs in that scan posted within
-  `BASELINE_DELIVER_POSTED_WITHIN_HOURS` (48) are still delivered. A
-  brand-new install records everything on its first run.
+  flood Discord. A brand-new install records everything on its first run the
+  same way. In both cases, jobs posted within
+  `BASELINE_DELIVER_POSTED_WITHIN_HOURS` (48) are still delivered.
 - Each job list has its own health record, so one broken list does not mark
   the others unhealthy. The career-page scan time is recorded only when the
   career scan was healthy; otherwise the next `auto` run retries it.
