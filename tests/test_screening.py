@@ -30,8 +30,12 @@ from screening import (
     "Applicants must not require sponsorship now or in the future.",
     "Applicants who now or in the future require sponsorship will not be considered.",
     "This role is not eligible for visa sponsorship.",
-    "We can't sponsor at this time.",
+    "Visa sponsorship: we can't sponsor at this time.",
     "Immigration sponsorship unavailable.",
+    "Applicants requiring visa sponsorship now or in the future are not eligible for this role.",
+    "We cannot accept candidates who require visa sponsorship.",
+    "We are unable to consider applicants who will require employment visa sponsorship.",
+    "This role does not include employment sponsorship or relocation assistance.",
 ])
 def test_detects_no_sponsorship(text):
     result = screen_text(description=text)
@@ -70,6 +74,11 @@ def test_conflicting_statements_are_unknown_and_kept(text):
     "Sponsorship of tech meetups and open source projects is part of our culture.",
     "No sponsorship required for the conference talk budget.",
     "Our sponsors include major universities.",
+    "We can't sponsor at this time.",
+    "We are unable to sponsor relocation costs for this role.",
+    "Offers may be conditioned on authorization to receive controlled technology "
+    "without sponsorship for an export license.",
+    "DoorDash does not support students on J-1 visas at this time.",
 ])
 def test_neutral_text_is_unknown(text):
     result = screen_text(description=text)
@@ -135,7 +144,7 @@ def test_clearance_false_positives(text):
     "Candidates on F-1 OPT or CPT are not eligible for this role.",
     "We are unable to accept OPT or STEM OPT candidates.",
     "Students on F-1 visas will not be considered.",
-    "Not eligible: J-1 visa holders.",
+    "Not eligible: F-1 or J-1 visa holders.",
 ])
 def test_detects_student_visa_ineligibility(text):
     result = screen_text(description=text)
@@ -148,6 +157,7 @@ def test_detects_student_visa_ineligibility(text):
     "We optimize compilers. Not eligible for remote work.",
     "Our F1 racing analytics team builds telemetry tools.",
     "F-1 OPT and STEM OPT candidates are welcome to apply.",
+    "Not eligible: J-1 visa holders.",
 ])
 def test_student_visa_false_positives(text):
     assert screen_text(description=text).opt_ineligible is False

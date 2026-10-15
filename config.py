@@ -994,18 +994,43 @@ _NEGATION = (
     r"|are\s+not|aren'?t|is\s+not|isn'?t|unable|not\s+able|not\s+in\s+a\s+position"
     r"|no\s+longer)"
 )
-_STUDENT_VISA = r"(?:F-?1|J-?1|(?-i:STEM\s+OPT|OPT|CPT)|student\s+visas?)"
+# J-1 is an exchange-visitor status, so "does not support J-1 visas" says
+# nothing about F-1 OPT.
+_STUDENT_VISA = r"(?:F-?1|(?-i:STEM\s+OPT|OPT|CPT)|student\s+visas?)"
+_STUDENT_WORK_AUTH = (
+    r"(?:F-?1|(?-i:STEM\s+OPT|OPT|CPT)|(?:curricular|optional)\s+practical\s+training)"
+)
 _US = r"\bu\.?\s?s\.?(?:a\.?)?"
 
 # Regular expressions are matched case-insensitively against title and
-# description text.
+# description text. A no-sponsorship match only counts when its sentence is
+# about immigration (IMMIGRATION_CONTEXT_PATTERN) and it is not sponsorship
+# for an export license, so "unable to sponsor relocation costs" and "without
+# sponsorship for an export license" are ignored.
+IMMIGRATION_CONTEXT_PATTERN = (
+    r"\b(?:visas?|h-?1b|immigration|immigrant|work\s+(?:authori[sz]ation|permits?|eligibility)"
+    r"|employment\s+(?:authori[sz]ation|eligibility|sponsorship|visas?)"
+    r"|authori[sz]ed\s+to\s+work|right\s+to\s+work|green\s+cards?|permanent\s+residen\w*"
+    r"|citizenship|sponsorship|F-?1|(?-i:OPT|CPT)"
+    r"|sponsor\w*\s+(?:candidates|applicants|individuals|employees|anyone|you|workers))\b"
+)
+EXPORT_LICENSE_SPONSORSHIP_PATTERN = (
+    r"\bsponsor(?:ship)?\s+(?:for|of)\s+(?:an?\s+|the\s+)?(?:[\w.]+\s+){0,2}?export\b"
+)
+
 NO_SPONSORSHIP_PATTERNS = [
     _NEGATION + r"\s+(?:be\s+)?(?:able\s+)?(?:to\s+)?sponsor\b",
     r"\b(?:visa\s+|immigration\s+)?sponsorship(?:\s+available)?\s*[:?]\s*"
     r"(?:no\b|not\s+available|none\b|n/a\b|unavailable)",
     _NEGATION + r"\s+(?:be\s+)?(?:able\s+)?(?:to\s+)?"
-    r"(?:offer|provide|support|sponsor|consider|accommodate)\w*\s+"
+    r"(?:offer|provide|support|sponsor|consider|accommodate|include)\w*\s+"
     r"(?:[\w/.'-]+\s+){0,5}?(?:visa|sponsor|h-?1b|immigration)",
+    _NEGATION + r"\s+(?:be\s+)?(?:able\s+)?(?:to\s+)?"
+    r"(?:accept|consider|hire|employ|move\s+forward\s+with)\s+(?:any\s+)?"
+    r"(?:applicants?|candidates?|individuals?|anyone|persons?|people)\s+"
+    r"(?:who\s+(?:will\s+|may\s+|would\s+|currently\s+|now\s+)?(?:or\s+in\s+the\s+future\s+)?"
+    r"(?:require|need)s?|requiring|needing|that\s+(?:require|need)s?)\s+"
+    r"(?:[\w-]+\s+){0,3}?sponsorship",
     r"\bno\s+(?:visa\s+|immigration\s+|employment\s+|h-?1b\s+)?sponsorship\b"
     r"(?!\s+(?:is\s+)?(?:required|needed|necessary))",
     r"\bsponsorship\s+(?:is\s+|will\s+)?(?:not|n't)\s+(?:be\s+)?"
@@ -1018,7 +1043,9 @@ NO_SPONSORSHIP_PATTERNS = [
     r"(?:visa\s+|immigration\s+|h-?1b\s+|employment\s+)?sponsorship",
     r"\b(?:must|does|do|will|should)\s+not\s+(?:now\s+or\s+in\s+the\s+future\s+)?"
     r"(?:currently\s+)?require\s+(?:[\w-]+\s+){0,2}?sponsorship",
-    r"\b(?:require|need)s?\s+(?:visa\s+|immigration\s+|employment\s+|h-?1b\s+)?"
+    r"\b(?:requir(?:e|es|ing)|need(?:s|ing)?)\s+"
+    r"(?:(?:now\s+or\s+in\s+the\s+future|current\s+or\s+future|future|any)\s+)?"
+    r"(?:visa\s+|immigration\s+|employment\s+|employer\s+|h-?1b\s+)?"
     r"sponsorship[^.;]{0,80}?\b(?:not\s+(?:be\s+)?eligible|ineligible"
     r"|(?:will|can)\s*not\s+be\s+considered|not\s+be\s+considered)",
 ]
@@ -1037,15 +1064,35 @@ SPONSORSHIP_OFFERED_PATTERNS = [
 
 CITIZENSHIP_REQUIRED_PATTERNS = [
     _US + r"\s+citizen(?:ship)?\s+(?:is\s+|are\s+)?(?:required|mandatory|needed)",
+    # Also ITAR lists: "applicant must be a (i) U.S. citizen or national, ..."
     r"\b(?:must|required\s+to|need\s+to)\s+(?:be|hold|have|possess)\s+(?:an?\s+)?"
-    + _US + r"\s+citizen",
+    r"(?:\(\w{1,4}\)\s+)?" + _US + r"\s+citizen",
     r"\brequires?\s+" + _US + r"\s+citizenship\b",
     r"\b" + _US + r"\s+citizens?\s+only\b",
     r"\bonly\s+(?:open\s+to\s+)?" + _US + r"\s+citizens\b",
     r"\b(?:green\s+card|permanent\s+resident)s?\s+(?:holders?\s+)?only\b",
+    r"\bmust\s+be\s+an?\s+" + _US + r"\s+person\b",
+]
+
+# Mentions that only restrict eligibility when their sentence also states a
+# requirement ("restricted to US citizens or lawful permanent residents"), not
+# in "U.S. citizens and permanent residents are encouraged to apply".
+CITIZENSHIP_MENTION_PATTERNS = [
     r"\b(?:" + _US + r"\s+)?citizens?\s+(?:or|and|/)\s+(?:lawful\s+)?(?:" + _US
     + r"\s+)?(?:permanent\s+residents?|green\s+card\s+holders?)\b",
-    r"\bmust\s+be\s+an?\s+" + _US + r"\s+person\b",
+]
+
+# Statements that F-1 students on OPT/CPT can be hired. One of these overrides
+# a no-sponsorship, citizenship, or student-visa match in the same posting:
+# "cannot sponsor H-1B, but can support OPT" leaves sponsorship unknown.
+OPT_ELIGIBLE_PATTERNS = [
+    r"\b(?:can|will|do|does|are\s+able\s+to|is\s+able\s+to|happy\s+to|glad\s+to|we)\s+"
+    r"(?:also\s+|gladly\s+|happily\s+)?(?:support|accept|consider|hire|welcome|sponsor)\w*\s+"
+    r"(?:[\w/.'()-]+\s+){0,4}?" + _STUDENT_WORK_AUTH,
+    _STUDENT_WORK_AUTH + r"[^.;]{0,60}?\b(?:are|is)\s+(?:also\s+)?"
+    r"(?:eligible|welcome|accepted|supported|considered)\b",
+    r"\b(?:work|employment)\s+authori[sz]ation\s*[(,]?\s*(?:including|incl\.?|such\s+as|e\.g\.,?)"
+    r"\s+(?:[\w-]+\s+){0,2}?" + _STUDENT_WORK_AUTH,
 ]
 
 # Only applied to titles, where a bare mention implies a requirement.
@@ -1060,7 +1107,8 @@ CLEARANCE_REQUIRED_PATTERNS = [
     r"\b(?:secret|security|government|dod|federal)\s+clearance\b",
     r"\bclearance\s+(?:is\s+)?required\b",
     r"\b(?:active|current)\s+(?:ts|secret|clearance)\b",
-    r"\bpolygraph\b",
+    # Not the "Employee Polygraph Protection Act (EPPA)" poster in EEO footers.
+    r"(?<!employee\s)\bpolygraph\b(?!\s+protection)",
 ]
 
 OPT_INELIGIBLE_PATTERNS = [
