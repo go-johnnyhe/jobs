@@ -90,7 +90,8 @@ class TestFreshInstallAndMigration:
         assert rows["Acme"]["assistant_notified"] == SUPPRESSED
         assert rows["Acme"]["suppressed_reason"] == "before_assistant_channel"
         assert rows["Acme"]["dedupe_key"] == "greenhouse:1"
-        assert rows["Acme"]["last_seen"] == "2026-10-01"
+        # Last-listed dates were never recorded; they count from the migration.
+        assert rows["Acme"]["last_seen"] == datetime.now(timezone.utc).date().isoformat()
         # Jobs Discord was still waiting on are also queued for the assistant.
         assert rows["Beta"]["notified"] == PENDING
         assert rows["Beta"]["assistant_notified"] == PENDING
@@ -106,6 +107,21 @@ class TestFreshInstallAndMigration:
         assert health[0]["source"] == "careers"
         assert health[0]["consecutive_failures"] == 2
         assert health[0]["pending_recovery_after"] == 0
+
+    def test_migrated_jobs_are_not_pruned_on_the_first_run(self, tmp_path):
+        # A job delivered in March whose source fails on the migration run is
+        # not listed then. Pruning it would send it again once the source is back.
+        path = str(tmp_path / "legacy.db")
+        legacy_db(path, [
+            ("Acme|SWE|u", "Acme", "SWE", "https://acme.example/1", "Seattle, WA",
+             "career_page", "2026-03-10 10:00:00", 1),
+        ])
+        storage = JobStorage(path)
+        assert storage.prune(180) == 0
+        assert storage.partition_new([Job(
+            company="Acme", title="SWE", url="https://acme.example/1",
+            location="Seattle, WA", source="career_page",
+        )])[0] == []
 
     def test_migration_runs_once(self, tmp_path):
         path = str(tmp_path / "legacy.db")

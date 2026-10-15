@@ -191,7 +191,11 @@ class JobStorage:
                 ((dedupe_key(url, title), row_id) for row_id, url, title in rows),
             )
         if "last_seen" in added:
-            conn.execute("UPDATE seen_jobs SET last_seen = date(first_seen)")
+            # Older databases never recorded when a job was last listed.
+            # Count from the migration, so pruning does not delete old jobs
+            # whose source happened to fail on the first run; they would be
+            # sent again once the source recovered.
+            conn.execute("UPDATE seen_jobs SET last_seen = date('now')")
 
     def _ensure_health_table(self, conn: sqlite3.Connection, table: str, key_column: str):
         """Create or migrate a health-tracking table."""

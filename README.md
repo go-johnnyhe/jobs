@@ -233,7 +233,9 @@ commit.
 does not exist yet, so the workflow restores the last `jobs.db` from the
 Actions cache. Existing rows are migrated in place: their Discord status is
 kept, they are not replayed to the assistant, and every source that already
-had jobs counts as scanned. That run creates the state branch. The workflow
+had jobs counts as scanned. Their last-listed date starts at the migration,
+so the 180-day pruning cannot delete (and later resend) old jobs whose
+source failed on that first run. That run creates the state branch. The workflow
 no longer saves to the cache; the old cache entry is only read when the
 state branch is missing. If neither exists, the run is treated as a fresh
 install.
