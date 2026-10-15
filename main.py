@@ -14,7 +14,7 @@ from assistant_notifier import AssistantNotifier
 from enrichment import enrich_descriptions
 from job_keys import dedupe_key
 from models import Job
-from screening import screen_job
+from screening import SCREENING_VERSION, screen_job
 from state_store import load_state_file, save_state_file
 from config import (
     ASSISTANT_MAX_JOBS_PER_RUN,
@@ -362,10 +362,12 @@ def _process_scan(
         skip_baseline=skip_baseline,
     )
     summary["baselined"] = baselined_counts
+    rescreen = storage.stale_screened_out(known_jobs, SCREENING_VERSION)
 
-    if SCREENING["fetch_descriptions"] and deliver:
+    if SCREENING["fetch_descriptions"] and (deliver or rescreen):
+        # New jobs come first, so they get the per-run fetch budget before re-screens.
         counts = enrich_descriptions(
-            deliver,
+            deliver + rescreen,
             max_fetches=SCREENING["max_description_fetches_per_run"],
         )
         summary["descriptions"] = counts
@@ -404,12 +406,32 @@ def _process_scan(
             discord_state=SUPPRESSED,
             assistant_state=SUPPRESSED,
             suppressed_reason=f"screened_out:{reason}",
+            screening_version=SCREENING_VERSION,
         )
     stored = storage.add_jobs(queued, discord_state=PENDING, assistant_state=PENDING)
     storage.add_jobs(known_jobs)
     storage.mark_baselined(scanned_units)
-    summary["queued"] = len(stored)
-    return stored
+    requeued = _rescreen_known(storage, rescreen)
+    summary["requeued"] = len(requeued)
+    summary["queued"] = len(stored) + len(requeued)
+    return stored + requeued
+
+
+def _rescreen_known(storage: JobStorage, jobs: list[Job]) -> list[Job]:
+    """Re-screen jobs dropped by an older screening version; queue the ones now kept.
+
+    A job whose description could not be fetched this run keeps its old
+    version and is tried again on a later run.
+    """
+    requeued = []
+    for job in jobs:
+        if job.description_url and not job.description:
+            continue
+        reason = screen_job(job)
+        if storage.apply_rescreen(job, version=SCREENING_VERSION, drop_reason=reason):
+            print(f"  Re-screened and queued: {job.company} - {job.title}")
+            requeued.append(job)
+    return requeued
 
 
 def _print_summary(summary: dict):
@@ -441,6 +463,8 @@ def _print_summary(summary: dict):
     if summary.get("baselined"):
         details = ", ".join(f"{unit}={count}" for unit, count in sorted(summary["baselined"].items()))
         print(f"  Recorded without notifying (first scan of a source): {details}")
+    if summary.get("requeued"):
+        print(f"  Queued again after re-screening with new rules: {summary['requeued']}")
     print(f"  Queued for delivery: {summary.get('queued', 0)}")
     flags = summary.get("flags")
     if flags:

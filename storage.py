@@ -45,6 +45,13 @@ _JOB_COLUMNS = {
     "min_years_experience": "INTEGER",
     "screening_notes": "TEXT NOT NULL DEFAULT '[]'",
     "suppressed_reason": "TEXT",
+    # screening.SCREENING_VERSION that screened the job out; a different
+    # version re-screens it the next time a source lists it.
+    "screening_version": "TEXT",
+    # When a job was queued again after first_seen (re-screened and kept);
+    # backlog expiry counts from here.
+    "queued_at": "TEXT",
+    "assistant_attempts": "INTEGER NOT NULL DEFAULT 0",
 }
 _HEALTH_COLUMNS = [
     "consecutive_failures",
@@ -253,6 +260,7 @@ class JobStorage:
         discord_state: Optional[int] = None,
         assistant_state: Optional[int] = None,
         suppressed_reason: Optional[str] = None,
+        screening_version: Optional[str] = None,
         now: Optional[datetime] = None,
     ) -> list[Job]:
         """Insert a scan in one transaction and return only newly stored jobs.
@@ -279,18 +287,75 @@ class JobStorage:
                     (unique_id, company, title, url, location, source, date_posted,
                      notified, assistant_notified, dedupe_key, last_seen,
                      sponsorship, seniority_flag, min_years_experience,
-                     screening_notes, suppressed_reason)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     screening_notes, suppressed_reason, screening_version)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     job.unique_id, job.company, job.title, job.url,
                     job.location, job.source, job.date_posted,
                     discord_value, assistant_value, key, seen_date,
                     job.sponsorship, job.seniority_flag, job.min_years_experience,
                     json.dumps(job.screening_notes, ensure_ascii=False),
-                    suppressed_reason,
+                    suppressed_reason, screening_version,
                 ))
                 new_jobs.append(job)
         return new_jobs
+
+    def stale_screened_out(self, jobs: Iterable[Job], version: str) -> list[Job]:
+        """Jobs from a scan that were screened out by a different screening version."""
+        stale = []
+        with closing(self._connect()) as conn:
+            for job in jobs:
+                row = conn.execute(f"""
+                    SELECT 1 FROM seen_jobs
+                    WHERE (unique_id = ? OR dedupe_key = ?)
+                      AND suppressed_reason LIKE 'screened_out:%'
+                      AND notified = {SUPPRESSED} AND assistant_notified = {SUPPRESSED}
+                      AND COALESCE(screening_version, '') != ?
+                    LIMIT 1
+                """, (job.unique_id, dedupe_key(job.url, job.title), version)).fetchone()
+                if row:
+                    stale.append(job)
+        return stale
+
+    def apply_rescreen(
+        self,
+        job: Job,
+        *,
+        version: str,
+        drop_reason: Optional[str],
+        now: Optional[datetime] = None,
+    ) -> bool:
+        """Record a re-screen of a screened-out job. Returns True if it was queued again."""
+        params = {
+            "unique_id": job.unique_id,
+            "key": dedupe_key(job.url, job.title),
+            "version": version,
+            "sponsorship": job.sponsorship,
+            "seniority": job.seniority_flag,
+            "years": job.min_years_experience,
+            "notes": json.dumps(job.screening_notes, ensure_ascii=False),
+        }
+        match = "(unique_id = :unique_id OR dedupe_key = :key) AND suppressed_reason LIKE 'screened_out:%'"
+        with closing(self._connect()) as conn, conn:
+            if drop_reason:
+                conn.execute(f"""
+                    UPDATE seen_jobs
+                    SET suppressed_reason = :reason, screening_version = :version,
+                        sponsorship = :sponsorship, seniority_flag = :seniority,
+                        min_years_experience = :years, screening_notes = :notes
+                    WHERE {match}
+                """, {**params, "reason": f"screened_out:{drop_reason}"})
+                return False
+            cursor = conn.execute(f"""
+                UPDATE seen_jobs
+                SET notified = {PENDING}, assistant_notified = {PENDING},
+                    suppressed_reason = NULL, screening_version = :version,
+                    queued_at = :queued_at, assistant_attempts = 0,
+                    sponsorship = :sponsorship, seniority_flag = :seniority,
+                    min_years_experience = :years, screening_notes = :notes
+                WHERE {match}
+            """, {**params, "queued_at": _sqlite_timestamp(now or _utc_now())})
+            return cursor.rowcount > 0
 
     def _channel_column(self, channel: str) -> str:
         try:
@@ -343,7 +408,7 @@ class JobStorage:
             cursor = conn.execute(f"""
                 UPDATE seen_jobs
                 SET {column} = {SUPPRESSED}, suppressed_reason = ?
-                WHERE {column} = {PENDING} AND first_seen < ?
+                WHERE {column} = {PENDING} AND COALESCE(queued_at, first_seen) < ?
             """, (f"{channel}_backlog_expired", cutoff))
             return cursor.rowcount
 

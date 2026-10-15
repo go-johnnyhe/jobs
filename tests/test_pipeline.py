@@ -2,15 +2,18 @@
 
 from collections import Counter
 import json
+import re
 import sqlite3
 import sys
 
 import pytest
 
 import main
+import screening
 from assistant_notifier import AssistantNotifier
 from models import Job, ScrapeResult
 from storage import DELIVERED, PENDING, SUPPRESSED, JobStorage
+from tests.postings import load_posting
 from tests.test_assistant_notifier import WebhookServer
 
 SIMPLIFY = "SimplifyJobs/New-Grad-Positions"
@@ -143,6 +146,100 @@ def test_process_scan_stores_each_outcome(storage, monkeypatch):
         scanned_units={SPEEDY}, skip_baseline=False, summary={},
     )
     assert [job.title for job in again] == ["Software Engineer 106"]
+
+
+def _elastic_job():
+    posting = load_posting("elastic_analytics_engineer_us")
+    job = make_job(
+        8244449, source="career_page", company="Elastic", title=posting.title,
+        description_url="https://boards-api.greenhouse.io/v1/boards/elastic/jobs/8244449",
+    )
+    return job, posting.text
+
+
+def test_rule_change_rescreens_past_drops(storage, monkeypatch):
+    storage.set_meta("fresh_install", None)
+    storage.mark_baselined({"careers:Elastic"})
+    fetched = []
+
+    def fake_enrich(jobs, *, max_fetches):
+        for job in jobs:
+            fetched.append(job.title)
+            job.description = text
+        return {"candidates": len(jobs), "fetched": len(jobs), "failed": 0, "skipped": 0}
+
+    monkeypatch.setattr(main, "enrich_descriptions", fake_enrich)
+    # The rules before this fix: any "polygraph", including the EPPA poster footer.
+    original_clearance = screening._CLEARANCE_RE
+    monkeypatch.setattr(
+        screening, "_CLEARANCE_RE", [*original_clearance, re.compile(r"\bpolygraph\b", re.I)],
+    )
+    monkeypatch.setattr(main, "SCREENING_VERSION", "old-rules")
+    job, text = _elastic_job()
+    assert main._process_scan(
+        storage, [job], scanned_units={"careers:Elastic"}, skip_baseline=False, summary={},
+    ) == []
+    row = storage.get_recent(1)[0]
+    assert row["suppressed_reason"] == "screened_out:clearance_required"
+    assert row["screening_version"] == "old-rules"
+    with sqlite3.connect(storage.db_path) as conn:
+        conn.execute("UPDATE seen_jobs SET first_seen = '2020-01-01 00:00:00'")
+
+    # The next scan with fixed rules re-fetches, re-screens, and queues it.
+    monkeypatch.setattr(screening, "_CLEARANCE_RE", original_clearance)
+    monkeypatch.setattr(main, "SCREENING_VERSION", "new-rules")
+    job, _ = _elastic_job()
+    summary = {}
+    queued = main._process_scan(
+        storage, [job], scanned_units={"careers:Elastic"}, skip_baseline=False, summary=summary,
+    )
+    assert [j.title for j in queued] == [job.title]
+    assert summary["requeued"] == 1
+    row = storage.get_recent(1)[0]
+    assert (row["notified"], row["assistant_notified"]) == (PENDING, PENDING)
+    assert row["suppressed_reason"] is None
+    assert row["screening_version"] == "new-rules"
+    assert row["queued_at"]
+    # Backlog expiry counts from when it was queued again, not from first_seen.
+    assert storage.retire_stale_pending("assistant", 168) == 0
+
+    # Same rules on the next scan: no re-fetch, no second queueing.
+    fetched.clear()
+    job, _ = _elastic_job()
+    assert main._process_scan(
+        storage, [job], scanned_units={"careers:Elastic"}, skip_baseline=False, summary={},
+    ) == []
+    assert fetched == []
+
+
+def test_rescreen_that_still_drops_or_cannot_fetch(storage, monkeypatch):
+    storage.set_meta("fresh_install", None)
+    storage.mark_baselined({"careers:Acme"})
+    drop = make_job(1, source="career_page", description_url="https://api.example/1")
+    unfetched = make_job(2, source="career_page", description_url="https://api.example/2")
+    storage.add_jobs(
+        [drop, unfetched], discord_state=SUPPRESSED, assistant_state=SUPPRESSED,
+        suppressed_reason="screened_out:no_sponsorship", screening_version="old-rules",
+    )
+
+    def fake_enrich(jobs, *, max_fetches):
+        for job in jobs:
+            if job.url == drop.url:
+                job.description = "We are unable to sponsor visas for this role."
+        return {"candidates": 2, "fetched": 1, "failed": 1, "skipped": 0}
+
+    monkeypatch.setattr(main, "enrich_descriptions", fake_enrich)
+    assert main._process_scan(
+        storage,
+        [make_job(1, source="career_page", description_url=drop.description_url),
+         make_job(2, source="career_page", description_url=unfetched.description_url)],
+        scanned_units={"careers:Acme"}, skip_baseline=False, summary={},
+    ) == []
+    rows = {row["title"]: row for row in storage.get_recent(10)}
+    assert rows[drop.title]["screening_version"] == main.SCREENING_VERSION
+    assert rows[drop.title]["notified"] == SUPPRESSED
+    assert rows[unfetched.title]["screening_version"] == "old-rules"
+    assert rows[unfetched.title]["notified"] == SUPPRESSED
 
 
 def test_failed_units_are_not_marked_scanned(storage):
