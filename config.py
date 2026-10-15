@@ -1148,6 +1148,11 @@ MAX_PENDING_JOBS_TO_NOTIFY = 50
 # Pending jobs older than this are retired without being sent. None keeps
 # them pending until delivered.
 DISCORD_MAX_PENDING_AGE_HOURS = None
+# A job Discord refuses on its own (HTTP 400/413, e.g. an embed it will not
+# accept) on this many runs is retired with suppressed_reason
+# "discord_rejected:HTTP <status>". Refused batches are split so one bad job
+# does not hold back the rest.
+DISCORD_MAX_REJECTIONS = 3
 
 ASSISTANT_WEBHOOK_URL = os.environ.get("ASSISTANT_WEBHOOK_URL", "")
 ASSISTANT_WEBHOOK_KEY = os.environ.get("ASSISTANT_WEBHOOK_KEY", "")
@@ -1164,6 +1169,10 @@ ASSISTANT_MAX_REJECTIONS = 3
 ASSISTANT_BACKOFF_SECONDS = 2.0
 ASSISTANT_MAX_RETRY_AFTER_SECONDS = 60.0
 ASSISTANT_TIMEOUT_SECONDS = 20
+# No new assistant batch starts after this many seconds in one run, so a slow
+# receiver (long Retry-After waits) cannot hit the tracker step's 15-minute
+# timeout. Discord is sent first and does not wait on the assistant.
+ASSISTANT_MAX_SECONDS_PER_RUN = 300
 
 # ---------------------------------------------------------------------------
 # Scheduling and durable state

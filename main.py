@@ -6,12 +6,17 @@ from collections import Counter, defaultdict, deque
 from datetime import datetime, timedelta, timezone
 import re
 import sys
+import time
 import traceback
 from typing import Callable, Optional
 
 from sources import GitHubTracker, CareerScraper
 from storage import JobStorage, PENDING, SUPPRESSED
-from notifier import DiscordNotifier, MAX_EMBEDS_PER_MESSAGE
+from notifier import (
+    CONTENT_REJECTED_STATUS as DISCORD_CONTENT_REJECTED_STATUS,
+    DiscordNotifier,
+    MAX_EMBEDS_PER_MESSAGE,
+)
 from assistant_notifier import AssistantNotifier
 from enrichment import enrich_descriptions
 from http_client import describe_request_error
@@ -24,9 +29,11 @@ from config import (
     ASSISTANT_MAX_JOBS_PER_RUN,
     ASSISTANT_MAX_PENDING_AGE_HOURS,
     ASSISTANT_MAX_REJECTIONS,
+    ASSISTANT_MAX_SECONDS_PER_RUN,
     BASELINE_DELIVER_POSTED_WITHIN_HOURS,
     COMPANY_FAILURE_ALERT_THRESHOLDS,
     DISCORD_MAX_PENDING_AGE_HOURS,
+    DISCORD_MAX_REJECTIONS,
     ENABLE_COMPANY_HEALTH_ALERTS,
     FULL_SCAN_INTERVAL_MINUTES,
     MAX_PENDING_JOBS_TO_NOTIFY,
@@ -40,6 +47,7 @@ from config import (
 META_LAST_FULL_SCAN = "last_full_scan_at"
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 META_FRESH_INSTALL = "fresh_install"
+ASSISTANT_HEALTH_SOURCE = "assistant_webhook"
 
 
 def _utc_now() -> datetime:
@@ -156,6 +164,37 @@ def _update_company_health(
                     )
 
 
+def _record_rejections(
+    storage: JobStorage,
+    channel: str,
+    rejected: list[tuple[dict, int]],
+    *,
+    accepted: int,
+    max_rejections: int,
+) -> bool:
+    """Count jobs a channel rejected on their own; retire them at max_rejections.
+
+    A channel that accepted nothing this run and rejected more than one job
+    is refusing everything (a changed receiver, a broken payload), not one
+    bad job. Those rejections are not counted, so a fix on the receiving end
+    loses nothing. Returns True if the rejections were counted.
+    """
+    if not accepted and len(rejected) > 1:
+        print(
+            f"{channel} rejected all {len(rejected)} job(s) it was sent and accepted none; "
+            "not counting the rejections, every job stays pending"
+        )
+        return False
+    for job, status in rejected:
+        retired = storage.record_rejection(channel, job, status, max_rejections)
+        outcome = (
+            f"retired after {max_rejections} rejections" if retired
+            else "kept pending for the next run"
+        )
+        print(f"{channel} rejected {job['company']} - {job['title']} (HTTP {status}); {outcome}")
+    return True
+
+
 def _send_pending_notifications(
     storage: JobStorage,
     notifier: DiscordNotifier,
@@ -167,6 +206,8 @@ def _send_pending_notifications(
 
     At most MAX_PENDING_JOBS_TO_NOTIFY jobs go out per run. The rest stay
     pending for later runs; nothing is marked notified unless it was sent.
+    A batch Discord refuses (HTTP 400/413) is split in half and resent down
+    to single jobs, so one bad job cannot hold back every later job.
     """
     if DISCORD_MAX_PENDING_AGE_HOURS is not None and not dry_run:
         retired = storage.retire_stale_pending("discord", DISCORD_MAX_PENDING_AGE_HOURS)
@@ -187,9 +228,14 @@ def _send_pending_notifications(
 
     print(f"Sending Discord notifications for {len(jobs_to_send)} pending job(s)...")
     sent_jobs = 0
-
-    for batch_index, start in enumerate(range(0, len(jobs_to_send), MAX_EMBEDS_PER_MESSAGE)):
-        batch = jobs_to_send[start:start + MAX_EMBEDS_PER_MESSAGE]
+    rejected = []
+    stopped = False
+    queue = deque(enumerate(
+        jobs_to_send[start:start + MAX_EMBEDS_PER_MESSAGE]
+        for start in range(0, len(jobs_to_send), MAX_EMBEDS_PER_MESSAGE)
+    ))
+    while queue:
+        batch_index, batch = queue.popleft()
         sent = notifier.send_job_batch(
             batch,
             total_jobs=len(jobs_to_send),
@@ -197,26 +243,45 @@ def _send_pending_notifications(
             dry_run=dry_run,
             queued_after=queued_after,
         )
-        if not sent:
-            remaining = len(pending_jobs) - sent_jobs
-            print(
-                f"Stopped after failed batch {batch_index + 1}; "
-                f"{remaining} job(s) remain pending"
-            )
-            return False
+        if sent:
+            if not dry_run:
+                storage.mark_notified(batch)
+                checkpoint()
+            sent_jobs += len(batch)
+            continue
+        status = getattr(notifier, "last_status", None)
+        if status in DISCORD_CONTENT_REJECTED_STATUS:
+            if len(batch) > 1:
+                middle = len(batch) // 2
+                print(
+                    f"Discord refused batch {batch_index + 1} (HTTP {status}); "
+                    f"retrying its {len(batch)} job(s) in two smaller batches"
+                )
+                queue.extendleft([(batch_index, batch[middle:]), (batch_index, batch[:middle])])
+            else:
+                rejected.append((batch[0], status))
+            continue
+        remaining = len(pending_jobs) - sent_jobs
+        print(
+            f"Stopped after failed batch {batch_index + 1}; "
+            f"{remaining} job(s) remain pending"
+        )
+        stopped = True
+        break
 
-        if not dry_run:
-            storage.mark_notified(batch)
-            checkpoint()
-        sent_jobs += len(batch)
-
+    if rejected and not dry_run:
+        _record_rejections(
+            storage, "discord", rejected,
+            accepted=sent_jobs, max_rejections=DISCORD_MAX_REJECTIONS,
+        )
+        checkpoint()
     if dry_run:
         print("Dry run complete; pending jobs were not marked as notified")
-    else:
+    elif not stopped:
         print(f"Marked {sent_jobs} job(s) as notified")
         if queued_after:
             print(f"{queued_after} job(s) remain pending for the next run")
-    return True
+    return not stopped and not rejected
 
 
 def _send_assistant_notifications(
@@ -226,11 +291,13 @@ def _send_assistant_notifications(
     dry_run: bool,
     run_timestamp: str,
     checkpoint: Callable[[], None] = lambda: None,
+    clock: Callable[[], float] = time.monotonic,
 ) -> bool:
     """Deliver pending jobs to the assistant webhook, independently of Discord.
 
     checkpoint runs after every batch whose outcome was recorded, so a run
-    killed midway still persists what it delivered.
+    killed midway still persists what it delivered. No new batch starts after
+    ASSISTANT_MAX_SECONDS_PER_RUN; the rest stay pending for the next run.
     """
     if not dry_run:
         retired = storage.retire_stale_pending("assistant", ASSISTANT_MAX_PENDING_AGE_HOURS)
@@ -255,10 +322,19 @@ def _send_assistant_notifications(
         f"Sending {len(jobs_to_send)} job(s) to the assistant webhook "
         f"in {len(batches)} batch(es)..."
     )
+    started = clock()
     sent_jobs = 0
-    rejected = 0
+    rejected = []
+    ok = True
     queue = deque(enumerate(batches))
     while queue:
+        if clock() - started >= ASSISTANT_MAX_SECONDS_PER_RUN:
+            print(
+                f"Assistant webhook used its {ASSISTANT_MAX_SECONDS_PER_RUN}s budget for this run; "
+                f"{len(pending_jobs) - sent_jobs} job(s) remain pending"
+            )
+            ok = False
+            break
         batch_index, batch = queue.popleft()
         payload = assistant.build_payload(
             batch,
@@ -284,34 +360,28 @@ def _send_assistant_notifications(
             queue.extendleft([(batch_index, batch[middle:]), (batch_index, batch[:middle])])
             continue
         if result.content_rejected:
-            rejected += 1
-            job = batch[0]
-            retired = storage.record_assistant_rejection(
-                job, result.status, ASSISTANT_MAX_REJECTIONS,
-            )
-            checkpoint()
-            outcome = (
-                f"retired after {ASSISTANT_MAX_REJECTIONS} rejections" if retired
-                else "kept pending for the next run"
-            )
-            print(
-                f"Assistant webhook rejected {job['company']} - {job['title']} "
-                f"(HTTP {result.status}); {outcome}"
-            )
+            rejected.append((batch[0], result.status))
             continue
         print(
             f"Assistant batch {batch_index + 1} failed; "
             f"{len(pending_jobs) - sent_jobs} job(s) remain pending for the assistant"
         )
-        return False
+        ok = False
+        break
 
+    if rejected and not dry_run:
+        _record_rejections(
+            storage, "assistant", rejected,
+            accepted=sent_jobs, max_rejections=ASSISTANT_MAX_REJECTIONS,
+        )
+        checkpoint()
     if dry_run:
         print("Dry run complete; assistant jobs were not marked as delivered")
     else:
         print(f"Delivered {sent_jobs} job(s) to the assistant webhook")
     if rejected:
-        print(f"{rejected} job(s) were rejected by the assistant webhook")
-    return not rejected
+        print(f"{len(rejected)} job(s) were rejected by the assistant webhook")
+    return ok and not rejected
 
 
 def _resolve_scan_plan(args, storage: JobStorage, now: datetime) -> tuple[bool, bool, str]:
@@ -751,7 +821,10 @@ def main():
 
 
 def _run_tracker(args, storage: JobStorage, notifier: DiscordNotifier, assistant: AssistantNotifier) -> bool:
-    """Scan, store, and deliver. Returns False if any delivery channel failed."""
+    """Scan, store, and deliver. Returns False if Discord delivery failed.
+
+    Assistant webhook failures raise Discord health alerts instead.
+    """
     print("=== Job Tracker ===\n")
     now = _utc_now()
     run_timestamp = _iso(now)
@@ -852,6 +925,15 @@ def _run_tracker(args, storage: JobStorage, notifier: DiscordNotifier, assistant
         if args.state_file:
             save_state_file(args.state_file, storage)
 
+    # Discord goes first, so a slow or failing assistant webhook can never
+    # delay it or use up the step timeout.
+    print()
+    discord_ok = _send_pending_notifications(
+        storage,
+        notifier,
+        dry_run=args.dry_run,
+        checkpoint=checkpoint,
+    )
     print()
     try:
         assistant_ok = _send_assistant_notifications(
@@ -862,20 +944,26 @@ def _run_tracker(args, storage: JobStorage, notifier: DiscordNotifier, assistant
             checkpoint=checkpoint,
         )
     except Exception as exc:
-        # Discord delivery must not depend on the assistant channel.
         # The traceback frames are printed without the exception message,
         # which can contain the webhook URL.
-        print(f"Assistant delivery crashed ({describe_request_error(exc)}); continuing with Discord")
+        print(f"Assistant delivery crashed ({describe_request_error(exc)})")
         print("".join(traceback.format_tb(exc.__traceback__)), end="")
         assistant_ok = False
-    print()
-    discord_ok = _send_pending_notifications(
-        storage,
-        notifier,
-        dry_run=args.dry_run,
-        checkpoint=checkpoint,
-    )
-    return assistant_ok and discord_ok
+    if assistant.configured:
+        # Assistant problems are reported like a failing source (a Discord
+        # alert after 3, 6, and 12 failed runs, then a recovery message)
+        # instead of failing the run, which would email on every 15-minute
+        # run while the receiver is down.
+        _update_source_health(
+            storage,
+            notifier,
+            [(ASSISTANT_HEALTH_SOURCE, assistant_ok,
+              "assistant webhook delivery failed; see the workflow run log")],
+            notify=True,
+            dry_run=args.dry_run,
+        )
+        checkpoint()
+    return discord_ok
 
 
 if __name__ == "__main__":

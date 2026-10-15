@@ -15,6 +15,9 @@ MAX_EMBED_URL_CHARS = 2048
 MAX_JOB_FIELD_VALUE_CHARS = 220
 MAX_SOURCE_FIELD_VALUE_CHARS = 80
 MAX_ERROR_FIELD_VALUE_CHARS = 1024
+# Statuses where Discord refused the message itself (an embed it will not
+# accept), so resending the same jobs can never succeed.
+CONTENT_REJECTED_STATUS = {400, 413}
 
 
 class DiscordNotifier:
@@ -26,6 +29,8 @@ class DiscordNotifier:
         # duplicate messages (Discord may process POST before returning error,
         # and connection/timeout retries on POST can also duplicate)
         self.session = create_session(retries=0)
+        # HTTP status of the last failed send_job_batch (None: no response).
+        self.last_status: Optional[int] = None
 
     def send_job_batch(
         self,
@@ -37,6 +42,7 @@ class DiscordNotifier:
         queued_after: int = 0,
     ) -> bool:
         """Send a single Discord message containing up to 10 job embeds."""
+        self.last_status = None
         if not jobs:
             return True
 
@@ -69,6 +75,7 @@ class DiscordNotifier:
             )
             return True
         except requests.RequestException as e:
+            self.last_status = getattr(getattr(e, "response", None), "status_code", None)
             print(f"Error sending Discord notification batch {batch_index + 1}: {describe_request_error(e)}")
             return False
 

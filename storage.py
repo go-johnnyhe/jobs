@@ -23,6 +23,11 @@ CHANNEL_COLUMNS = {
     "discord": "notified",
     "assistant": "assistant_notified",
 }
+# Runs on which a channel rejected a job on its own (see record_rejection).
+ATTEMPT_COLUMNS = {
+    "discord": "discord_attempts",
+    "assistant": "assistant_attempts",
+}
 
 STATE_FORMAT = "job-tracker-state"
 STATE_VERSION = 1
@@ -52,6 +57,7 @@ _JOB_COLUMNS = {
     # backlog expiry counts from here.
     "queued_at": "TEXT",
     "assistant_attempts": "INTEGER NOT NULL DEFAULT 0",
+    "discord_attempts": "INTEGER NOT NULL DEFAULT 0",
 }
 _HEALTH_COLUMNS = [
     "consecutive_failures",
@@ -354,7 +360,7 @@ class JobStorage:
                 UPDATE seen_jobs
                 SET notified = {PENDING}, assistant_notified = {PENDING},
                     suppressed_reason = NULL, screening_version = :version,
-                    queued_at = :queued_at, assistant_attempts = 0,
+                    queued_at = :queued_at, assistant_attempts = 0, discord_attempts = 0,
                     sponsorship = :sponsorship, seniority_flag = :seniority,
                     min_years_experience = :years, screening_notes = :notes
                 WHERE {match}
@@ -389,23 +395,27 @@ class JobStorage:
                  for job in jobs),
             )
 
-    def record_assistant_rejection(self, job: Job | dict, status: int, max_rejections: int) -> bool:
-        """Count one rejection of a job by the assistant; retire it at max_rejections.
+    def record_rejection(
+        self, channel: str, job: Job | dict, status: int, max_rejections: int,
+    ) -> bool:
+        """Count one rejection of a job by a channel; retire it at max_rejections.
 
         Returns True when the job was retired (no longer pending).
         """
+        column = self._channel_column(channel)
+        attempts = ATTEMPT_COLUMNS[channel]
         unique_id = job.unique_id if isinstance(job, Job) else job["unique_id"]
         with closing(self._connect()) as conn, conn:
             conn.execute(
-                "UPDATE seen_jobs SET assistant_attempts = assistant_attempts + 1 WHERE unique_id = ?",
+                f"UPDATE seen_jobs SET {attempts} = {attempts} + 1 WHERE unique_id = ?",
                 (unique_id,),
             )
             cursor = conn.execute(f"""
                 UPDATE seen_jobs
-                SET assistant_notified = {SUPPRESSED}, suppressed_reason = ?
-                WHERE unique_id = ? AND assistant_notified = {PENDING}
-                  AND assistant_attempts >= ?
-            """, (f"assistant_rejected:HTTP {status}", unique_id, max_rejections))
+                SET {column} = {SUPPRESSED}, suppressed_reason = ?
+                WHERE unique_id = ? AND {column} = {PENDING}
+                  AND {attempts} >= ?
+            """, (f"{channel}_rejected:HTTP {status}", unique_id, max_rejections))
             return cursor.rowcount > 0
 
     def get_unnotified(self) -> list[dict]:
@@ -548,6 +558,8 @@ class JobStorage:
                 record.setdefault("assistant_notified", PENDING)
                 record.setdefault("sponsorship", "unknown")
                 record.setdefault("seniority_flag", "none")
+                for column in ATTEMPT_COLUMNS.values():
+                    record.setdefault(column, 0)
                 rows.append(tuple(record.get(column) for column in job_columns))
             placeholders = ", ".join("?" for _ in job_columns)
             conn.executemany(

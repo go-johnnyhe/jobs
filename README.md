@@ -137,19 +137,26 @@ New jobs are POSTed as JSON, at most `ASSISTANT_BATCH_SIZE` (25) per request:
   content: the batch is split in half and each half is resent, down to single
   jobs, so one bad job does not hold back the others. A job rejected on its
   own on `ASSISTANT_MAX_REJECTIONS` (3) runs is retired with the reason
-  `assistant_rejected:HTTP <status>` (shown by `--list-recent`). Other
-  failures (401, 403, 404, retries exhausted) stop assistant delivery for
-  that run and leave everything pending.
+  `assistant_rejected:HTTP <status>` (shown by `--list-recent`). If the
+  webhook rejects every job in a run and accepts none, the receiver is
+  treated as broken rather than the jobs: nothing is counted and every job
+  stays pending. Other failures (401, 403, 404, retries exhausted) stop
+  assistant delivery for that run and leave everything pending.
+- Discord is sent first. The assistant starts no new batch after
+  `ASSISTANT_MAX_SECONDS_PER_RUN` (300 s), so long `Retry-After` waits
+  cannot reach the step timeout; the rest stays pending.
 - Webhook errors are logged as the exception type and HTTP status only, so
   webhook URLs, keys, and response bodies never appear in Action logs.
-- If the assistant step crashes, Discord delivery still runs and the run is
-  marked failed.
+- Assistant failures (including a crash of the assistant step) do not fail
+  the run. They are tracked like a failing source named `assistant_webhook`:
+  a Discord alert after 3, 6, and 12 failed runs, and a recovery message
+  when it works again.
 
 Send a test event with `python main.py --test-assistant-webhook`.
 
 Delivery to Discord and to the assistant is tracked separately: one channel
-failing does not block or duplicate the other. A run where either channel
-fails exits non-zero so it shows up as a failed Action.
+failing does not block or duplicate the other. A run where Discord fails
+exits non-zero so it shows up as a failed Action.
 
 ## Sponsorship and seniority screening
 
@@ -216,6 +223,12 @@ commit.
 - Discord sends at most `MAX_PENDING_JOBS_TO_NOTIFY` (50) jobs per run, oldest
   first; the rest stay pending for the next run and the first message says
   how many are queued.
+- A batch Discord refuses (HTTP 400 or 413, such as an embed it will not
+  accept) is split in half and resent down to single jobs. A job refused on
+  its own on `DISCORD_MAX_REJECTIONS` (3) runs is retired with the reason
+  `discord_rejected:HTTP <status>`, so one bad job cannot stop every later
+  job. Rate limits, outages, and auth errors stop that run's delivery and
+  leave everything pending.
 - The same posting found on several lists or career pages is recognized by
   its ATS job ID (Greenhouse, Lever, Ashby, Workday, Amazon, SmartRecruiters,
   Google) or canonical URL plus title, and is sent once.

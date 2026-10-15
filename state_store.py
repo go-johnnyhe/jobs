@@ -72,7 +72,10 @@ def _merge_job(ours: dict, theirs: dict) -> dict:
             if other == SUPPRESSED:
                 merged["suppressed_reason"] = theirs.get("suppressed_reason")
                 merged["screening_version"] = theirs.get("screening_version")
-    for column, pick in (("first_seen", min), ("last_seen", max), ("assistant_attempts", max)):
+    for column, pick in (
+        ("first_seen", min), ("last_seen", max),
+        ("assistant_attempts", max), ("discord_attempts", max),
+    ):
         values = [v for v in (ours.get(column), theirs.get(column)) if v is not None]
         if values:
             merged[column] = pick(values)

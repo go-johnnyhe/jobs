@@ -482,6 +482,155 @@ def test_discord_overflow_never_marks_unsent_jobs(storage):
     assert stats["suppressed_jobs"] == 0
 
 
+class RefusingDiscord(RecordingDiscord):
+    """Refuses, with HTTP status, every batch holding a title in bad (all
+    batches when bad is None)."""
+
+    def __init__(self, bad=None, status=400):
+        super().__init__()
+        self.bad, self.status = bad, status
+        self.last_status = None
+
+    def send_job_batch(self, jobs, *, total_jobs, batch_index, dry_run, queued_after=0):
+        titles = [job["title"] for job in jobs]
+        self.batches.append(titles)
+        if self.bad is None or set(self.bad) & set(titles):
+            self.last_status = self.status
+            return False
+        self.last_status = None
+        return True
+
+
+def _row(storage, title):
+    return next(row for row in storage.get_recent(100) if row["title"] == title)
+
+
+def test_discord_refused_job_is_isolated_and_retired_after_three_runs(storage):
+    seed_pending(storage, 25)
+    bad = "Software Engineer 13"
+    for run in range(3):
+        discord = RefusingDiscord(bad=[bad])
+        assert main._send_pending_notifications(storage, discord, dry_run=False) is False
+        assert [row["title"] for row in storage.get_pending("discord")] == ([bad] if run < 2 else [])
+        if run == 0:
+            sent = [title for batch in discord.batches if bad not in batch for title in batch]
+            assert len(sent) == 24 and len(set(sent)) == 24
+    row = _row(storage, bad)
+    assert row["notified"] == SUPPRESSED
+    assert row["suppressed_reason"] == "discord_rejected:HTTP 400"
+    assert row["discord_attempts"] == 3
+    assert row["assistant_notified"] == PENDING
+
+    # Later runs deliver normally and never resend the retired job.
+    storage.add_jobs([make_job(50)])
+    discord = RefusingDiscord(bad=[bad])
+    assert main._send_pending_notifications(storage, discord, dry_run=False) is True
+    assert discord.batches == [["Software Engineer 50"]]
+
+
+@pytest.mark.parametrize("status", [None, 401, 404, 429, 500])
+def test_discord_outage_is_not_split_or_counted(storage, status):
+    seed_pending(storage, 15)
+    discord = RefusingDiscord(status=status)
+    assert main._send_pending_notifications(storage, discord, dry_run=False) is False
+    assert len(discord.batches) == 1
+    pending = storage.get_pending("discord")
+    assert len(pending) == 15
+    assert {row["discord_attempts"] for row in pending} == {0}
+
+
+def test_channel_refusing_every_job_retires_nothing(storage):
+    seed_pending(storage, 4)
+    for _ in range(5):
+        assert main._send_pending_notifications(storage, RefusingDiscord(), dry_run=False) is False
+        assert main._send_assistant_notifications(
+            storage, RecordingAssistant(results=[422] * 20), dry_run=False, run_timestamp="t",
+        ) is False
+    for channel, attempts in (("discord", "discord_attempts"), ("assistant", "assistant_attempts")):
+        pending = storage.get_pending(channel)
+        assert len(pending) == 4
+        assert {row[attempts] for row in pending} == {0}
+
+    # Once the receiver is fixed, everything is delivered.
+    assert main._send_pending_notifications(storage, RecordingDiscord(), dry_run=False) is True
+    assert main._send_assistant_notifications(
+        storage, RecordingAssistant(), dry_run=False, run_timestamp="t",
+    ) is True
+    assert storage.get_pending("discord") == [] and storage.get_pending("assistant") == []
+
+
+def test_lone_refused_job_is_still_retired(storage):
+    seed_pending(storage, 1)
+    for _ in range(3):
+        main._send_pending_notifications(storage, RefusingDiscord(), dry_run=False)
+        main._send_assistant_notifications(
+            storage, RecordingAssistant(results=[400]), dry_run=False, run_timestamp="t",
+        )
+    row = _row(storage, "Software Engineer 0")
+    assert row["notified"] == SUPPRESSED
+    assert row["assistant_notified"] == SUPPRESSED
+
+
+def test_assistant_stops_starting_batches_after_its_time_budget(storage, monkeypatch):
+    seed_pending(storage, 60)
+    monkeypatch.setattr(main, "ASSISTANT_MAX_SECONDS_PER_RUN", 300)
+    ticks = iter([0, 0, 299, 300])
+    assistant = RecordingAssistant()
+    assert main._send_assistant_notifications(
+        storage, assistant, dry_run=False, run_timestamp="t", clock=lambda: next(ticks),
+    ) is False
+    assert [p["batch"]["size"] for p in assistant.payloads] == [25, 25]
+    assert len(storage.get_pending("assistant")) == 10
+
+
+class AlertingDiscord(RecordingDiscord):
+    def __init__(self):
+        super().__init__()
+        self.alerts = []
+
+    def notify_source_failure(self, source, failures, *_args, **_kwargs):
+        self.alerts.append(("failure", source, failures))
+        return True
+
+    def notify_source_recovery(self, source, recovered_after, **_kwargs):
+        self.alerts.append(("recovery", source, recovered_after))
+        return True
+
+
+def test_discord_is_sent_before_the_assistant_and_assistant_outage_alerts(monkeypatch, tmp_path):
+    feeds = Feeds()
+    discord = AlertingDiscord()
+    assistant = RecordingAssistant(results=[False] * 3)
+    install_fakes(monkeypatch, feeds, discord, assistant)
+    order = []
+    send_discord, send_assistant = main._send_pending_notifications, main._send_assistant_notifications
+    monkeypatch.setattr(
+        main, "_send_pending_notifications",
+        lambda *a, **k: order.append("discord") or send_discord(*a, **k),
+    )
+    monkeypatch.setattr(
+        main, "_send_assistant_notifications",
+        lambda *a, **k: order.append("assistant") or send_assistant(*a, **k),
+    )
+    db = str(tmp_path / "a.db")
+    storage = JobStorage(db)
+    storage.set_meta("fresh_install", None)
+    storage.mark_baselined({SIMPLIFY, "careers:Acme"})
+
+    feeds.lists[SIMPLIFY] = [make_job(1)]
+    for run in range(3):
+        # The assistant is down; runs still succeed and Discord delivers.
+        assert run_main(monkeypatch, "--notify", "--db", db, "--mode", "fast") == 0
+        assert order[-2:] == ["discord", "assistant"]
+    assert discord.batches == [["Software Engineer 1"]]
+    assert discord.alerts == [("failure", "assistant_webhook", 3)]
+    assert len(storage.get_pending("assistant")) == 1
+
+    assert run_main(monkeypatch, "--notify", "--db", db, "--mode", "fast") == 0
+    assert discord.alerts[-1] == ("recovery", "assistant_webhook", 3)
+    assert storage.get_pending("assistant") == []
+
+
 # ---------------------------------------------------------------------------
 # End-to-end main()
 # ---------------------------------------------------------------------------
@@ -594,15 +743,20 @@ def test_end_to_end_runs_with_state_file(monkeypatch, tmp_path):
         headers = {k.lower(): v for k, v in server.requests[0]["headers"].items()}
         assert headers["authorization"] == "Bearer key"
 
-        # Run 3: assistant is down. Discord still delivers; the run fails so it is visible.
+        # Run 3: assistant is down. Discord still delivers. The outage is
+        # tracked as source health (a Discord alert after 3 failed runs)
+        # rather than failing every run.
         feeds.lists[SIMPLIFY].append(make_job(4))
         server.responses = [(503, {}, "")] * 2
-        assert run("--mode", "fast") == 1
+        assert run("--mode", "fast") == 0
         assert discord.batches[-1] == ["Software Engineer 4"]
         assert sent_titles(server) == ["Software Engineer 3"]
-        saved = {job["title"]: job for job in json.loads(open(state, encoding="utf-8").read())["jobs"]}
+        saved_state = json.loads(open(state, encoding="utf-8").read())
+        saved = {job["title"]: job for job in saved_state["jobs"]}
         assert saved["Software Engineer 4"]["notified"] == DELIVERED
         assert saved["Software Engineer 4"]["assistant_notified"] == PENDING
+        health = {row["source"]: row for row in saved_state["source_health"]}
+        assert health["assistant_webhook"]["consecutive_failures"] == 1
 
         # Run 4: assistant recovers and receives only the job it missed.
         assert run("--mode", "full") == 0
@@ -661,7 +815,9 @@ def test_new_list_is_baselined_and_failed_list_is_not(monkeypatch, tmp_path):
     main.load_state_file(state, storage)
     assert storage.baselined_units() == {SIMPLIFY, "careers:Acme"}
     health = {row["source"]: row["consecutive_failures"] for row in storage.export_state()["source_health"]}
-    assert health == {f"github:{SIMPLIFY}": 0, f"github:{SPEEDY}": 1, "careers": 0}
+    assert health == {
+        f"github:{SIMPLIFY}": 0, f"github:{SPEEDY}": 1, "careers": 0, "assistant_webhook": 0,
+    }
 
     # The list comes back with a big backlog: recorded silently.
     feeds.failing_lists = set()
@@ -749,12 +905,14 @@ def test_assistant_crash_does_not_stop_discord(monkeypatch, tmp_path, capsys):
 
     monkeypatch.setattr(main, "_send_assistant_notifications", boom)
     feeds.lists[SIMPLIFY] = [make_job(1)]
-    assert run_main(monkeypatch, "--notify", "--db", db) == 1
+    assert run_main(monkeypatch, "--notify", "--db", db) == 0
     assert discord.batches == [["Software Engineer 1"]]
     out = capsys.readouterr().out
     assert "Assistant delivery crashed (ValueError)" in out
     assert "s3cr3t" not in out
     assert len(storage.get_pending("assistant")) == 1
+    health = {row["source"]: row for row in storage.export_state()["source_health"]}
+    assert health["assistant_webhook"]["consecutive_failures"] == 1
 
 
 def test_dry_run_sends_and_marks_nothing(monkeypatch, tmp_path, capsys):
