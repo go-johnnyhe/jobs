@@ -399,7 +399,7 @@ def screen_text(
             "conflicting sponsorship statements: "
             f"'{_short(no_sponsorship[0])}' / '{_short(offered[0])}'"
         )
-    elif no_sponsorship and opt_eligible:
+    elif no_sponsorship and opt_eligible and not SCREENING["drop_no_sponsorship_with_opt"]:
         result.notes.append(
             f"no sponsorship ('{_short(no_sponsorship[0])}'), but student work "
             f"authorization accepted: '{_short(opt_eligible[0])}'"
@@ -407,6 +407,10 @@ def screen_text(
     elif no_sponsorship:
         result.sponsorship = SPONSORSHIP_NO
         result.notes.append(f"no sponsorship: '{_short(no_sponsorship[0])}'")
+        if opt_eligible:
+            result.notes.append(
+                f"accepts OPT/CPT without visa sponsorship: '{_short(opt_eligible[0])}'"
+            )
     elif offered:
         result.sponsorship = SPONSORSHIP_YES
         result.notes.append(f"sponsorship offered: '{_short(offered[0])}'")

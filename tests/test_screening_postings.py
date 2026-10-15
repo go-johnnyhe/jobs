@@ -15,6 +15,7 @@ from screening import (
     DROP_OPT_INELIGIBLE,
     screen_text,
 )
+from config import SCREENING
 from tests.postings import compose, load_posting
 
 CLOUDFLARE = "cloudflare_software_engineer_platforms"
@@ -110,7 +111,22 @@ def test_clearance_differential_is_not_a_requirement():
     "We cannot sponsor H-1B visas for this role, but we can support candidates on OPT and STEM OPT.",
     "We are unable to sponsor visas; F-1 OPT candidates are welcome to apply.",
 ])
-def test_opt_support_vetoes_no_sponsorship(base, sentence):
+def test_opt_support_without_visa_sponsorship_still_drops(base, sentence):
+    # OPT ends; a job that will not sponsor H-1B after it is not viable.
+    result = _screen(compose(base, sentence))
+    assert result.drop_reason == DROP_NO_SPONSORSHIP, result.notes
+    assert result.sponsorship == "no"
+    assert result.notes[0].startswith("no sponsorship: ")
+    assert result.notes[1].startswith("accepts OPT/CPT without visa sponsorship")
+
+
+@pytest.mark.parametrize("base", [CLOUDFLARE, ELASTIC])
+@pytest.mark.parametrize("sentence", [
+    "We cannot sponsor H-1B visas for this role, but we can support candidates on OPT and STEM OPT.",
+    "We are unable to sponsor visas; F-1 OPT candidates are welcome to apply.",
+])
+def test_opt_support_vetoes_no_sponsorship_when_enabled(monkeypatch, base, sentence):
+    monkeypatch.setitem(SCREENING, "drop_no_sponsorship_with_opt", False)
     result = _screen(compose(base, sentence))
     assert result.drop_reason is None, result.notes
     assert result.sponsorship == "unknown"

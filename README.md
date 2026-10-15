@@ -172,8 +172,10 @@ candidates. To avoid false drops from boilerplate:
   ("citizens and permanent residents are encouraged to apply") are ignored;
   "citizens, permanent residents, or anyone authorized to work (including
   F-1 OPT)" is not a citizenship requirement.
-- A posting that refuses H-1B sponsorship but accepts OPT/STEM OPT or CPT is
-  kept as `unknown` with a note. J-1-only statements are ignored.
+- A posting that refuses visa sponsorship but accepts OPT/STEM OPT or CPT
+  is still dropped, because the job would need H-1B sponsorship once OPT
+  ends. Set `drop_no_sponsorship_with_opt` to `False` to keep those as
+  `unknown` with a note. J-1-only statements are ignored.
 - "Preferred" downgrades only the requirement it is attached to, so "TS/SCI
   required; Python preferred" still drops.
 - Negated phrases ("no security clearance required") and statements of

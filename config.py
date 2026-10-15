@@ -976,6 +976,10 @@ DATABASE_PATH = os.environ.get(
 # (no|unknown|yes) and seniority_flag (none|borderline|senior).
 SCREENING = {
     "drop_no_sponsorship": True,
+    # "We can't sponsor visas, but OPT/CPT candidates are welcome" still
+    # drops: OPT runs out and the job would need H-1B sponsorship after it.
+    # Set False to keep those jobs (sponsorship "unknown", with a note).
+    "drop_no_sponsorship_with_opt": True,
     "drop_citizenship_required": True,
     "drop_clearance_required": True,
     "drop_opt_ineligible": True,
