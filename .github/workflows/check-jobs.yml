@@ -3,7 +3,8 @@ name: Check for New Jobs
 on:
   schedule:
     # Fallback only: GitHub delays and drops scheduled runs, so an external
-    # scheduler should send repository_dispatch every 15-30 minutes (see README).
+    # scheduler should call the workflow_dispatch API every 15-30 minutes
+    # (see README).
     - cron: '17 * * * *'
   workflow_dispatch:
     inputs:
@@ -12,8 +13,6 @@ on:
         type: choice
         options: [auto, fast, full]
         default: auto
-  repository_dispatch:
-    types: [check-jobs]
 
 permissions:
   contents: write  # push the job-tracker-state branch
@@ -61,7 +60,7 @@ jobs:
       - name: Choose scan mode
         id: mode
         env:
-          INPUT_MODE: ${{ github.event.inputs.mode || github.event.client_payload.mode || 'auto' }}
+          INPUT_MODE: ${{ github.event.inputs.mode || 'auto' }}
         run: |
           case "$INPUT_MODE" in
             auto|fast|full) echo "mode=$INPUT_MODE" >> "$GITHUB_OUTPUT" ;;

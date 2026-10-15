@@ -22,7 +22,7 @@ python -m pytest tests/ -v           # Run all tests
 
 ## Architecture
 
-This is an automated new-grad SWE job tracker that scrapes jobs from two source types and sends Discord alerts plus an optional JSON assistant webhook. It runs via GitHub Actions (`.github/workflows/check-jobs.yml`), triggered by an external scheduler through `repository_dispatch` with an hourly cron fallback. Durable state is `state.json` on the `job-tracker-state` branch (`scripts/state_branch.sh`); the SQLite database is a per-run working copy.
+This is an automated new-grad SWE job tracker that scrapes jobs from two source types and sends Discord alerts plus an optional JSON assistant webhook. It runs via GitHub Actions (`.github/workflows/check-jobs.yml`), triggered by an external scheduler calling the `workflow_dispatch` API (`inputs.mode`: auto/fast/full) with an hourly cron fallback. Durable state is `state.json` on the `job-tracker-state` branch (`scripts/state_branch.sh`); the SQLite database is a per-run working copy.
 
 ### Data Flow
 
