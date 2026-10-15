@@ -23,7 +23,10 @@ from storage import (
 
 # When two runs disagree about a channel, a job either side delivered stays
 # delivered and one either side suppressed stays suppressed, so a merge never
-# makes a job pending again (which would send it twice).
+# makes a job pending again (which would send it twice). screening_version
+# travels with the suppressed mark: a re-queued pending copy (new version)
+# merged with an older suppress must not keep the new version, or
+# stale_screened_out would skip the job and the drop would stick.
 _CHANNEL_PRECEDENCE = {PENDING: 0, SUPPRESSED: 1, DELIVERED: 2}
 _LATEST_META_KEYS = {"last_full_scan_at"}
 
@@ -68,6 +71,7 @@ def _merge_job(ours: dict, theirs: dict) -> dict:
             merged[column] = other
             if other == SUPPRESSED:
                 merged["suppressed_reason"] = theirs.get("suppressed_reason")
+                merged["screening_version"] = theirs.get("screening_version")
     for column, pick in (("first_seen", min), ("last_seen", max), ("assistant_attempts", max)):
         values = [v for v in (ours.get(column), theirs.get(column)) if v is not None]
         if values:

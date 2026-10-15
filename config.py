@@ -1014,17 +1014,23 @@ _US = r"\bu\.?\s?s\.?(?:a\.?)?"
 # Regular expressions are matched case-insensitively against title and
 # description text. A no-sponsorship match only counts when its sentence is
 # about immigration (IMMIGRATION_CONTEXT_PATTERN) and it is not sponsorship
-# for an export license, so "unable to sponsor relocation costs" and "without
-# sponsorship for an export license" are ignored.
+# for an export license or relocation, so "unable to sponsor relocation costs",
+# "Relocation sponsorship is not available", and "without sponsorship for an
+# export license" are ignored.
 IMMIGRATION_CONTEXT_PATTERN = (
     r"\b(?:visas?|h-?1b|immigration|immigrant|work\s+(?:authori[sz]ation|permits?|eligibility)"
     r"|employment\s+(?:authori[sz]ation|eligibility|sponsorship|visas?)"
     r"|authori[sz]ed\s+to\s+work|right\s+to\s+work|green\s+cards?|permanent\s+residen\w*"
-    r"|citizenship|sponsorship|F-?1|(?-i:OPT|CPT)"
+    r"|citizenship|(?<!relocation[- ])sponsorship|F-?1|(?-i:OPT|CPT)"
     r"|sponsor\w*\s+(?:candidates|applicants|individuals|employees|anyone|you|workers))\b"
 )
 EXPORT_LICENSE_SPONSORSHIP_PATTERN = (
     r"\bsponsor(?:ship)?\s+(?:for|of)\s+(?:an?\s+|the\s+)?(?:[\w.]+\s+){0,2}?export\b"
+)
+RELOCATION_SPONSORSHIP_PATTERN = (
+    r"\brelocation[- ]sponsor"
+    r"|\bsponsor(?:ship)?\s+(?:for|of)\s+(?:an?\s+|the\s+)?relocation\b"
+    r"|\bsponsor\s+relocation\b"
 )
 
 NO_SPONSORSHIP_PATTERNS = [

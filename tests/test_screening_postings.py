@@ -132,8 +132,13 @@ def test_citizenship_alternatives_and_invitations_are_kept(base, sentence):
 
 
 @pytest.mark.parametrize("base", [CLOUDFLARE, ELASTIC])
-def test_relocation_sponsorship_is_not_visa_sponsorship(base):
-    result = _screen(compose(base, "We are unable to sponsor relocation costs for this role."))
+@pytest.mark.parametrize("sentence", [
+    "We are unable to sponsor relocation costs for this role.",
+    "Relocation sponsorship is not available.",
+    "Relocation sponsorship is not available for this position.",
+])
+def test_relocation_sponsorship_is_not_visa_sponsorship(base, sentence):
+    result = _screen(compose(base, sentence))
     assert result.sponsorship == "unknown", result.notes
     assert result.drop_reason is None
 
@@ -163,6 +168,7 @@ def test_citizenship_restrictions_drop(base, sentence):
     ("- Must hold an active Secret clearance, and a TS/SCI is a plus.", True),
     ("- Secret clearance required, TS/SCI preferred.", True),
     ("- Active TS/SCI clearance with polygraph required.", True),
+    ("- Must have the opportunity to obtain a TS/SCI clearance.", True),
     ("- Active Secret clearance is strongly preferred; TS/SCI is a plus.", False),
     ("- Candidates with an active Secret or higher clearance are strongly encouraged to apply.", False),
 ])

@@ -76,6 +76,8 @@ def test_conflicting_statements_are_unknown_and_kept(text):
     "Our sponsors include major universities.",
     "We can't sponsor at this time.",
     "We are unable to sponsor relocation costs for this role.",
+    "Relocation sponsorship is not available.",
+    "Relocation sponsorship is not available for this position.",
     "Offers may be conditioned on authorization to receive controlled technology "
     "without sponsorship for an export license.",
     "DoorDash does not support students on J-1 visas at this time.",
@@ -123,6 +125,7 @@ def test_title_mention_of_citizenship_is_a_requirement():
     "Must hold a Secret clearance.",
     "Top Secret eligibility is required.",
     "Applicants must be able to obtain a DoD clearance.",
+    "Must have the opportunity to obtain a TS/SCI clearance.",
     "Security clearance required.",
 ])
 def test_detects_clearance(text):

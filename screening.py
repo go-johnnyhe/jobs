@@ -25,6 +25,7 @@ from config import (
     NO_SPONSORSHIP_PATTERNS,
     OPT_ELIGIBLE_PATTERNS,
     OPT_INELIGIBLE_PATTERNS,
+    RELOCATION_SPONSORSHIP_PATTERN,
     SCREENING,
     SPONSORSHIP_OFFERED_PATTERNS,
     TITLE_CITIZENSHIP_PATTERNS,
@@ -60,11 +61,12 @@ _OPT_RE = _compile(OPT_INELIGIBLE_PATTERNS)
 _OPT_ELIGIBLE_RE = _compile(OPT_ELIGIBLE_PATTERNS)
 _IMMIGRATION_CONTEXT_RE = re.compile(IMMIGRATION_CONTEXT_PATTERN, re.IGNORECASE)
 _EXPORT_LICENSE_RE = re.compile(EXPORT_LICENSE_SPONSORSHIP_PATTERN, re.IGNORECASE)
+_RELOCATION_SPONSORSHIP_RE = re.compile(RELOCATION_SPONSORSHIP_PATTERN, re.IGNORECASE)
 
 # Bump when screening logic in this module changes. Together with the
 # configured rules it forms SCREENING_VERSION, which is stored on jobs
 # screened out after a description fetch so a rules change re-screens them.
-SCREENING_LOGIC_REVISION = 2
+SCREENING_LOGIC_REVISION = 3
 SCREENING_VERSION = hashlib.sha256(json.dumps({
     "revision": SCREENING_LOGIC_REVISION,
     "rules": {
@@ -77,6 +79,7 @@ SCREENING_VERSION = hashlib.sha256(json.dumps({
         TITLE_CITIZENSHIP_PATTERNS, CLEARANCE_REQUIRED_PATTERNS,
         OPT_INELIGIBLE_PATTERNS, OPT_ELIGIBLE_PATTERNS,
         IMMIGRATION_CONTEXT_PATTERN, EXPORT_LICENSE_SPONSORSHIP_PATTERN,
+        RELOCATION_SPONSORSHIP_PATTERN,
     ],
     "markers": LIST_MARKERS,
 }, sort_keys=True).encode()).hexdigest()[:12]
@@ -98,8 +101,14 @@ _PREFERRED_RE = re.compile(
 )
 # Clearance mentions that describe a perk or an option rather than a
 # requirement: "Those with an active clearance will receive a 10% differential".
+# Perk words yield to a must/required in the same clause, so "must have the
+# opportunity to obtain a TS/SCI clearance" is still a requirement.
+_CLEARANCE_PERK_RE = re.compile(
+    r"\b(?:differential|will\s+receive|may\s+provide|opportunity)\b",
+    re.IGNORECASE,
+)
 _CLEARANCE_SOFT_RE = re.compile(
-    _PREFERRED_RE.pattern + r"|\b(?:differential|will\s+receive|may\s+provide|opportunity)\b",
+    _PREFERRED_RE.pattern + r"|" + _CLEARANCE_PERK_RE.pattern,
     re.IGNORECASE,
 )
 _REQUIRED_CUE_RE = re.compile(
@@ -277,7 +286,8 @@ def _is_preferred(
 
     "Active Secret clearance (Top Secret preferred)" and "Secret clearance
     required, TS/SCI preferred" prefer only TS; a clause with no cue states a
-    requirement.
+    requirement. Perk words such as "opportunity" yield to a must/required in
+    the same clause.
     """
     left = max(sentence.rfind(mark, 0, start) for mark in _CLAUSE_BOUNDARY) + 1
     right_candidates = [
@@ -286,9 +296,12 @@ def _is_preferred(
     right = min(right_candidates) if right_candidates else len(sentence)
     clause = sentence[left:right]
     start, end = start - left, end - left
+    required_in_clause = _REQUIRED_CUE_RE.search(clause)
     nearest: Optional[tuple[int, bool]] = None
     for cue_re, preferred in ((_REQUIRED_CUE_RE, False), (preferred_re, True)):
         for cue in cue_re.finditer(clause):
+            if preferred and required_in_clause and _CLEARANCE_PERK_RE.fullmatch(cue.group(0)):
+                continue
             if cue.end() <= start:
                 distance = start - cue.end()
             elif cue.start() >= end:
@@ -310,6 +323,7 @@ def _is_immigration_sponsorship(text: str, match: re.Match) -> bool:
     if export and export.start() <= match.end() - match.start():
         return False
     sentence = _EXPORT_LICENSE_RE.sub(" ", _sentence_at(text, match.start(), match.end()))
+    sentence = _RELOCATION_SPONSORSHIP_RE.sub(" ", sentence)
     return bool(_IMMIGRATION_CONTEXT_RE.search(sentence))
 
 

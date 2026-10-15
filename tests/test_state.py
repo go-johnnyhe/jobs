@@ -386,6 +386,37 @@ def test_merge_never_makes_a_handled_job_pending_again(tmp_path):
     json.loads(format_state(merged))
 
 
+@pytest.mark.parametrize("pending_is_ours", [True, False])
+def test_merge_keeps_old_screening_version_when_suppress_beats_requeued_pending(
+    tmp_path, pending_is_ours,
+):
+    """A re-screened pending job must not keep its new version if suppress wins.
+
+    Otherwise stale_screened_out sees the current version and never re-fetches.
+    """
+    job = make_job(1)
+
+    def as_pending(storage):
+        storage.add_jobs(
+            [job], discord_state=PENDING, assistant_state=PENDING,
+            screening_version="new-rules",
+        )
+
+    def as_suppressed(storage):
+        storage.add_jobs(
+            [job], discord_state=SUPPRESSED, assistant_state=SUPPRESSED,
+            suppressed_reason="screened_out:no_sponsorship",
+            screening_version="old-rules",
+        )
+
+    ours, theirs = (as_pending, as_suppressed) if pending_is_ours else (as_suppressed, as_pending)
+    merged = merge_states(_state(tmp_path, "ours", ours), _state(tmp_path, "theirs", theirs))
+    row = merged["jobs"][0]
+    assert (row["notified"], row["assistant_notified"]) == (SUPPRESSED, SUPPRESSED)
+    assert row["screening_version"] == "old-rules"
+    assert row["suppressed_reason"] == "screened_out:no_sponsorship"
+
+
 def test_merge_keeps_the_latest_full_scan_and_rejects_foreign_files(tmp_path):
     ours = _state(tmp_path, "a", lambda s: s.set_meta("last_full_scan_at", "2026-10-14T10:00:00Z"))
     theirs = _state(tmp_path, "b", lambda s: s.set_meta("last_full_scan_at", "2026-10-14T11:00:00Z"))
