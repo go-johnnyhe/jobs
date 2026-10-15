@@ -4,6 +4,7 @@
 import argparse
 from collections import Counter, defaultdict, deque
 from datetime import datetime, timedelta, timezone
+import re
 import sys
 import traceback
 from typing import Callable, Optional
@@ -16,12 +17,14 @@ from enrichment import enrich_descriptions
 from http_client import describe_request_error
 from job_keys import dedupe_key
 from models import Job
+from posted_dates import normalize_posted_date
 from screening import SCREENING_VERSION, screen_job
 from state_store import load_state_file, save_state_file
 from config import (
     ASSISTANT_MAX_JOBS_PER_RUN,
     ASSISTANT_MAX_PENDING_AGE_HOURS,
     ASSISTANT_MAX_REJECTIONS,
+    BASELINE_DELIVER_POSTED_WITHIN_HOURS,
     COMPANY_FAILURE_ALERT_THRESHOLDS,
     DISCORD_MAX_PENDING_AGE_HOURS,
     ENABLE_COMPANY_HEALTH_ALERTS,
@@ -35,6 +38,7 @@ from config import (
 )
 
 META_LAST_FULL_SCAN = "last_full_scan_at"
+_ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 META_FRESH_INSTALL = "fresh_install"
 
 
@@ -341,14 +345,20 @@ def _classify_new_jobs(
     fresh_install: bool,
     threshold: int,
     skip_baseline: bool,
+    now: Optional[datetime] = None,
 ) -> tuple[list[Job], list[Job], dict[str, int]]:
     """Split new jobs into (to deliver, to record silently as baseline).
 
     A unit that was never scanned before is baselined when this is a fresh
     install, or when it suddenly yields more than threshold unseen jobs (a
     newly added list). Smaller first batches, such as a new company with two
-    open new-grad roles, are delivered normally.
+    open new-grad roles, are delivered normally. Jobs in a baselined batch
+    that were posted within BASELINE_DELIVER_POSTED_WITHIN_HOURS are still
+    delivered, since they are new postings rather than backlog.
     """
+    recent_since = (
+        (now or _utc_now()) - timedelta(hours=BASELINE_DELIVER_POSTED_WITHIN_HOURS)
+    ).date().isoformat()
     by_unit: dict[str, list[Job]] = defaultdict(list)
     for job in new_jobs:
         by_unit[job.unit_key].append(job)
@@ -360,8 +370,13 @@ def _classify_new_jobs(
             and unit not in baselined_units
             and (fresh_install or len(jobs) > threshold)
         ):
-            baseline.extend(jobs)
-            baselined_counts[unit] = len(jobs)
+            for job in jobs:
+                posted = normalize_posted_date(job.date_posted, now=now)
+                if posted and _ISO_DATE_RE.match(posted) and posted >= recent_since:
+                    deliver.append(job)
+                else:
+                    baseline.append(job)
+                    baselined_counts[unit] = baselined_counts.get(unit, 0) + 1
         else:
             deliver.extend(jobs)
     return deliver, baseline, baselined_counts

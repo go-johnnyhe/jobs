@@ -1166,6 +1166,9 @@ FULL_SCAN_INTERVAL_MINUTES = 120
 # never been scanned is recorded without notifying when it yields more than
 # this many unseen jobs. This stops newly added sources from flooding Discord.
 NEW_SOURCE_BASELINE_MAX_JOBS = 5
+# Jobs in such a first scan whose posted date is within this many hours are
+# delivered anyway: they are new postings, not the source's backlog.
+BASELINE_DELIVER_POSTED_WITHIN_HOURS = 48
 
 # Delivered jobs that no source has listed for this many days are pruned from
 # the state file.

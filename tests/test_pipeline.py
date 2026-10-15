@@ -74,6 +74,25 @@ def test_new_unit_with_few_jobs_is_delivered_but_large_one_is_baselined():
     assert counts == {SPEEDY: 6}
 
 
+def test_baselined_batch_still_delivers_jobs_posted_in_the_last_48_hours():
+    from datetime import datetime, timezone
+    now = datetime(2026, 10, 14, 12, 0, tzinfo=timezone.utc)
+    posted = {
+        1: "2026-10-14", 2: "2026-10-12", 3: "2026-10-11", 4: "Posted Today",
+        5: "2026-10-13T08:00:00Z", 6: "Posted 30+ Days Ago", 7: None, 8: "soon",
+    }
+    jobs = [make_job(n, source=SPEEDY, date_posted=value) for n, value in posted.items()]
+    deliver, baseline, counts = main._classify_new_jobs(
+        jobs, baselined_units={SIMPLIFY}, fresh_install=False, threshold=5,
+        skip_baseline=False, now=now,
+    )
+    assert [job.title for job in deliver] == [
+        "Software Engineer 1", "Software Engineer 2", "Software Engineer 4", "Software Engineer 5",
+    ]
+    assert counts == {SPEEDY: 4}
+    assert len(baseline) == 4
+
+
 def test_skip_baseline_delivers_everything():
     jobs = [make_job(n, source=SPEEDY) for n in range(10)]
     deliver, baseline, _ = classify(jobs, fresh=True, skip=True)
