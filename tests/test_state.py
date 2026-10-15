@@ -7,7 +7,7 @@ import sqlite3
 import pytest
 
 from models import Job
-from state_store import format_state, load_state_file, save_state_file
+from state_store import format_state, load_state_file, merge_states, save_state_file
 from storage import DELIVERED, PENDING, SUPPRESSED, JobStorage
 
 NOW = datetime(2026, 10, 14, 12, 0, tzinfo=timezone.utc)
@@ -338,3 +338,67 @@ class TestStateFile:
         save_state_file(str(path), storage)
         save_state_file(str(path), storage)
         assert sorted(p.name for p in tmp_path.iterdir()) == ["jobs.db", "state.json"]
+
+
+# ---------------------------------------------------------------------------
+# Merging two runs' states
+# ---------------------------------------------------------------------------
+
+def _state(tmp_path, name, setup):
+    storage = JobStorage(str(tmp_path / f"{name}.db"))
+    setup(storage)
+    return storage.export_state()
+
+
+def test_merge_never_makes_a_handled_job_pending_again(tmp_path):
+    jobs = [make_job(n) for n in range(4)]
+
+    def base(storage):
+        storage.add_jobs(jobs)
+
+    def ours(storage):
+        base(storage)
+        storage.mark_delivered("assistant", [jobs[0]])
+        storage.retire_stale_pending("discord", 0, now=NOW + timedelta(days=1))
+        storage.add_jobs([make_job(9)])
+
+    def theirs(storage):
+        base(storage)
+        storage.mark_delivered("discord", [jobs[0], jobs[1]])
+        storage.add_jobs([make_job(8)], discord_state=SUPPRESSED, assistant_state=SUPPRESSED,
+                         suppressed_reason="baseline")
+        storage.mark_baselined({"careers:Acme"})
+        storage.set_meta("fresh_install", None)
+
+    merged = merge_states(_state(tmp_path, "ours", ours), _state(tmp_path, "theirs", theirs))
+    rows = {job["title"]: job for job in merged["jobs"]}
+    assert set(rows) == {f"Software Engineer {n}" for n in (0, 1, 2, 3, 8, 9)}
+    # Delivered beats suppressed beats pending, per channel.
+    assert (rows["Software Engineer 0"]["notified"], rows["Software Engineer 0"]["assistant_notified"]) == (
+        DELIVERED, DELIVERED,
+    )
+    assert rows["Software Engineer 1"]["notified"] == DELIVERED
+    assert rows["Software Engineer 2"]["notified"] == SUPPRESSED
+    assert rows["Software Engineer 2"]["suppressed_reason"] == "discord_backlog_expired"
+    assert rows["Software Engineer 8"]["suppressed_reason"] == "baseline"
+    assert "careers:Acme" in merged["baselines"]
+    assert "fresh_install" not in merged["meta"]
+    json.loads(format_state(merged))
+
+
+def test_merge_keeps_the_latest_full_scan_and_rejects_foreign_files(tmp_path):
+    ours = _state(tmp_path, "a", lambda s: s.set_meta("last_full_scan_at", "2026-10-14T10:00:00Z"))
+    theirs = _state(tmp_path, "b", lambda s: s.set_meta("last_full_scan_at", "2026-10-14T11:00:00Z"))
+    assert merge_states(ours, theirs)["meta"]["last_full_scan_at"] == "2026-10-14T11:00:00Z"
+    with pytest.raises(ValueError):
+        merge_states(ours, {"jobs": []})
+    with pytest.raises(ValueError):
+        merge_states(ours, {**theirs, "version": 99})
+
+
+def test_health_success_is_day_granular_so_quiet_runs_do_not_change_state(storage):
+    storage.record_source_success("github")
+    before = format_state(storage.export_state())
+    storage.record_source_success("github")
+    assert format_state(storage.export_state()) == before
+    assert len(storage.export_state()["source_health"][0]["last_success_at"]) == len("2026-10-14")

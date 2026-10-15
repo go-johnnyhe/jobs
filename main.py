@@ -6,7 +6,7 @@ from collections import Counter, defaultdict, deque
 from datetime import datetime, timedelta, timezone
 import sys
 import traceback
-from typing import Optional
+from typing import Callable, Optional
 
 from sources import GitHubTracker, CareerScraper
 from storage import JobStorage, PENDING, SUPPRESSED
@@ -152,7 +152,13 @@ def _update_company_health(
                     )
 
 
-def _send_pending_notifications(storage: JobStorage, notifier: DiscordNotifier, *, dry_run: bool):
+def _send_pending_notifications(
+    storage: JobStorage,
+    notifier: DiscordNotifier,
+    *,
+    dry_run: bool,
+    checkpoint: Callable[[], None] = lambda: None,
+):
     """Send pending Discord notifications oldest-first and mark only sent batches.
 
     At most MAX_PENDING_JOBS_TO_NOTIFY jobs go out per run. The rest stay
@@ -197,6 +203,7 @@ def _send_pending_notifications(storage: JobStorage, notifier: DiscordNotifier, 
 
         if not dry_run:
             storage.mark_notified(batch)
+            checkpoint()
         sent_jobs += len(batch)
 
     if dry_run:
@@ -214,8 +221,13 @@ def _send_assistant_notifications(
     *,
     dry_run: bool,
     run_timestamp: str,
+    checkpoint: Callable[[], None] = lambda: None,
 ) -> bool:
-    """Deliver pending jobs to the assistant webhook, independently of Discord."""
+    """Deliver pending jobs to the assistant webhook, independently of Discord.
+
+    checkpoint runs after every batch whose outcome was recorded, so a run
+    killed midway still persists what it delivered.
+    """
     if not dry_run:
         retired = storage.retire_stale_pending("assistant", ASSISTANT_MAX_PENDING_AGE_HOURS)
         if retired:
@@ -256,6 +268,7 @@ def _send_assistant_notifications(
         if result.ok:
             if not dry_run:
                 storage.mark_delivered("assistant", batch)
+                checkpoint()
             sent_jobs += len(batch)
             continue
         if result.content_rejected and len(batch) > 1:
@@ -272,6 +285,7 @@ def _send_assistant_notifications(
             retired = storage.record_assistant_rejection(
                 job, result.status, ASSISTANT_MAX_REJECTIONS,
             )
+            checkpoint()
             outcome = (
                 f"retired after {ASSISTANT_MAX_REJECTIONS} rejections" if retired
                 else "kept pending for the next run"
@@ -813,6 +827,11 @@ def _run_tracker(args, storage: JobStorage, notifier: DiscordNotifier, assistant
 
     if not args.notify:
         return True
+
+    def checkpoint():
+        if args.state_file:
+            save_state_file(args.state_file, storage)
+
     print()
     try:
         assistant_ok = _send_assistant_notifications(
@@ -820,6 +839,7 @@ def _run_tracker(args, storage: JobStorage, notifier: DiscordNotifier, assistant
             assistant,
             dry_run=args.dry_run,
             run_timestamp=run_timestamp,
+            checkpoint=checkpoint,
         )
     except Exception as exc:
         # Discord delivery must not depend on the assistant channel.
@@ -833,6 +853,7 @@ def _run_tracker(args, storage: JobStorage, notifier: DiscordNotifier, assistant
         storage,
         notifier,
         dry_run=args.dry_run,
+        checkpoint=checkpoint,
     )
     return assistant_ok and discord_ok
 

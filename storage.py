@@ -840,11 +840,13 @@ class JobStorage:
             else:
                 recovery_after = 0
 
+            # Day granularity: a healthy run that finds nothing new leaves the
+            # state file unchanged, so the state branch gets no no-op commit.
             conn.execute(
                 f"""
                 INSERT INTO {table}
                 ({key_column}, consecutive_failures, last_error, last_success_at, last_alert_failure_count, pending_recovery_after)
-                VALUES (?, 0, NULL, CURRENT_TIMESTAMP, 0, ?)
+                VALUES (?, 0, NULL, date('now'), 0, ?)
                 ON CONFLICT({key_column}) DO UPDATE SET
                     consecutive_failures = 0,
                     last_error = NULL,

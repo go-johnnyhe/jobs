@@ -597,6 +597,35 @@ def test_end_to_end_runs_with_state_file(monkeypatch, tmp_path):
         assert len(server.requests) == requests_before
         assert len(discord.batches) == batches_before
 
+        # Run 6: a quiet fast run leaves the state file byte-identical, so the
+        # state branch gets no commit.
+        before = open(state, encoding="utf-8").read()
+        assert run("--mode", "fast") == 0
+        assert open(state, encoding="utf-8").read() == before
+
+
+def test_state_file_is_checkpointed_after_each_delivered_batch(monkeypatch, tmp_path):
+    feeds = Feeds()
+    state = tmp_path / "state.json"
+    snapshots = []
+
+    class SnapshotDiscord(RecordingDiscord):
+        def send_job_batch(self, jobs, **kwargs):
+            if self.batches:
+                saved = json.loads(state.read_text(encoding="utf-8"))
+                snapshots.append(sum(job["notified"] == DELIVERED for job in saved["jobs"]))
+            return super().send_job_batch(jobs, **kwargs)
+
+    install_fakes(monkeypatch, feeds, SnapshotDiscord(), RecordingAssistant(configured=False))
+    db = str(tmp_path / "a.db")
+    storage = JobStorage(db)
+    storage.set_meta("fresh_install", None)
+    storage.mark_baselined({SIMPLIFY, "careers:Acme"})
+    feeds.lists[SIMPLIFY] = [make_job(n) for n in range(25)]
+    assert run_main(monkeypatch, "--notify", "--db", db, "--state-file", str(state)) == 0
+    # Before batches 2 and 3 are sent, the file already records batches 1 and 2.
+    assert snapshots == [10, 20]
+
 
 def test_new_list_is_baselined_and_failed_list_is_not(monkeypatch, tmp_path):
     feeds = Feeds()

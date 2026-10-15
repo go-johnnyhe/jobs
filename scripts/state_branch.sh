@@ -15,6 +15,7 @@ state_file="${2:?usage: state_branch.sh restore|save <state-file>}"
 branch="${STATE_BRANCH:-job-tracker-state}"
 remote="${STATE_REMOTE:-origin}"
 tracking_ref="refs/remotes/${remote}/${branch}"
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 export GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME:-github-actions[bot]}"
 export GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-41898282+github-actions[bot]@users.noreply.github.com}"
@@ -61,8 +62,7 @@ restore() {
     output "found=false"
     return
   fi
-  with_retries git fetch --quiet --no-tags --depth=1 "$remote" \
-    "+refs/heads/${branch}:${tracking_ref}"
+  fetch_branch
   if git cat-file -e "${tracking_ref}:state.json" 2>/dev/null; then
     git show "${tracking_ref}:state.json" > "$state_file"
     echo "Restored ${state_file} from ${branch} ($(git rev-parse --short "$tracking_ref"))"
@@ -73,13 +73,15 @@ restore() {
   fi
 }
 
-save() {
-  if [[ ! -f "$state_file" ]]; then
-    echo "No state file at ${state_file}; nothing to save"
-    return
-  fi
-  python3 -c 'import json, sys; json.load(open(sys.argv[1], encoding="utf-8"))' "$state_file"
+fetch_branch() {
+  with_retries git fetch --quiet --no-tags --depth=1 "$remote" \
+    "+refs/heads/${branch}:${tracking_ref}"
+}
 
+# Commit the state file on top of the last fetched branch tip and push it.
+# Returns 1 if the push did not land (another writer moved the branch, or a
+# network error), so the caller can fetch, merge, and try again.
+commit_and_push() {
   local readme_blob state_blob tree parent=""
   state_blob="$(git hash-object -w "$state_file")"
   readme_blob="$(printf '%s\n' \
@@ -96,11 +98,11 @@ save() {
     parent="$(git rev-parse "${tracking_ref}^{commit}")"
     if [[ "$(git rev-parse "${parent}^{tree}")" == "$tree" ]]; then
       echo "State unchanged; nothing to commit"
-      return
+      return 0
     fi
   elif branch_exists; then
-    echo "State branch ${branch} appeared during this run; refusing to overwrite it" >&2
-    exit 1
+    echo "State branch ${branch} appeared during this run" >&2
+    return 1
   fi
 
   local commit
@@ -108,9 +110,39 @@ save() {
     -m "Update job tracker state ($(date -u +%Y-%m-%dT%H:%M:%SZ))")"
   # A plain push (no force) fails if another run moved the branch, rather
   # than discarding that run's deliveries.
-  with_retries git push --quiet "$remote" "${commit}:refs/heads/${branch}"
+  if ! git push --quiet "$remote" "${commit}:refs/heads/${branch}"; then
+    return 1
+  fi
   git update-ref "$tracking_ref" "$commit"
   echo "Saved state to ${branch} ($(git rev-parse --short "$commit"))"
+}
+
+save() {
+  if [[ ! -f "$state_file" ]]; then
+    echo "No state file at ${state_file}; nothing to save"
+    return
+  fi
+  python3 -c 'import json, sys; json.load(open(sys.argv[1], encoding="utf-8"))' "$state_file"
+
+  local attempt remote_state="${state_file}.remote"
+  for attempt in 1 2 3 4; do
+    if commit_and_push; then
+      return
+    fi
+    echo "State push did not land (attempt ${attempt}); merging with the current ${branch}" >&2
+    fetch_branch
+    if git cat-file -e "${tracking_ref}:state.json" 2>/dev/null; then
+      git show "${tracking_ref}:state.json" > "$remote_state"
+      if ! python3 "${repo_root}/state_store.py" merge "$state_file" "$remote_state" "$state_file"; then
+        rm -f "$remote_state"
+        echo "Refusing to overwrite ${branch}: its state could not be merged" >&2
+        exit 1
+      fi
+      rm -f "$remote_state"
+    fi
+  done
+  echo "Could not push state to ${branch} after ${attempt} attempts" >&2
+  exit 1
 }
 
 case "$command" in

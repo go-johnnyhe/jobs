@@ -69,6 +69,9 @@ jobs:
           esac
 
       - name: Run job tracker
+        # Shorter than the job timeout, so the persist step below still runs
+        # and saves the state file the tracker writes after every batch.
+        timeout-minutes: 15
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           ASSISTANT_WEBHOOK_URL: ${{ secrets.ASSISTANT_WEBHOOK_URL }}
@@ -79,10 +82,3 @@ jobs:
       - name: Persist durable state
         if: always()
         run: scripts/state_branch.sh save "$STATE_FILE"
-
-      - name: Save job database backup
-        uses: actions/cache/save@v4
-        if: always()
-        with:
-          path: jobs.db
-          key: jobs-db-${{ github.run_id }}
