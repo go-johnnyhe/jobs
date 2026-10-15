@@ -6,7 +6,7 @@ from typing import Optional
 import requests
 
 from config import GITHUB_REPOS, TARGET_COMPANIES
-from filters import has_role_keyword, matches_job_criteria
+from filters import compact_company_names, company_matches, has_role_keyword, matches_job_criteria
 from http_client import create_session
 from models import Job, ScrapeResult
 from posted_dates import normalize_posted_date
@@ -24,6 +24,7 @@ class GitHubTracker:
         self.last_successful_repos = 0
         self.last_repo_results: dict[str, ScrapeResult] = {}
         self.screen_counts: Counter = Counter()
+        self.targets = compact_company_names(TARGET_COMPANIES)
         self.session.headers.update({
             "Accept": "application/vnd.github.v3.raw",
             "User-Agent": "JobTracker/1.0",
@@ -127,15 +128,7 @@ class GitHubTracker:
 
     def _matches_criteria(self, job: Job) -> bool:
         """Check company, role, shared filters, then sponsorship screening."""
-        # Short targets (len <= 2) require exact match to avoid false positives
-        # (e.g. "f5" matching "Flexport")
-        company_lower = job.company.lower()
-        company_match = any(
-            (company_lower == target if len(target) <= 2 else target in company_lower)
-            for target in TARGET_COMPANIES
-        )
-
-        if not company_match:
+        if not company_matches(job.company, self.targets):
             return False
 
         if not (has_role_keyword(job.title) and matches_job_criteria(job)):

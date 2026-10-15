@@ -748,6 +748,15 @@ COMPANY_ALIASES = {
     "T-Mobile": ["tmobile"],
 }
 
+# Words that may follow a target name in a job list's company column and
+# still mean the same company ("Grafana Labs", "Citadel Securities").
+COMPANY_SUFFIX_WORDS = frozenset({
+    "inc", "incorporated", "llc", "ltd", "limited", "plc", "corp", "corporation",
+    "co", "company", "labs", "lab", "group", "securities", "ai", "technologies",
+    "technology", "tech", "software", "systems", "holdings", "platforms",
+    "international", "global", "us", "usa",
+})
+
 # Auto-derived from COMPANIES keys + COMPANY_ALIASES values
 TARGET_COMPANIES = sorted(set(
     [name.lower() for name in COMPANIES]

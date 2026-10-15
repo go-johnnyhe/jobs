@@ -94,11 +94,22 @@ def test_continuation_rows_keep_company_and_separate_locations():
 
 def test_company_matching_uses_real_filter(monkeypatch):
     from sources import github_tracker
-    monkeypatch.setattr(github_tracker, "TARGET_COMPANIES", ["f5", "cockroach"])
+    monkeypatch.setattr(
+        github_tracker, "TARGET_COMPANIES",
+        ["f5", "cockroach", "cisco", "cohere", "snap", "intel", "xai", "openai", "citadel", "block"],
+    )
     tracker = GitHubTracker()
-    for company, expected in [("F5", True), ("F5 Labs", False), ("CockroachLabs", True)]:
+    for company, expected in [
+        ("F5", True), ("Flexport", False), ("F5 Labs", True), ("CockroachLabs", True),
+        ("City of San Francisco", False), ("Cisco", True), ("Cisco Systems", True),
+        ("Coherent Solutions", False), ("Cohere", True),
+        ("Snap Finance", False), ("Snap", True), ("Snap Inc.", True),
+        ("Mintel", False), ("Modern Intelligence", False), ("Intel Corporation", True),
+        ("FlexAI", False), ("xAI", True), ("OpenAI", True), ("🔥 OpenAI", True),
+        ("Citadel Securities", True), ("H&R Block", False), ("The Block", True),
+    ]:
         job = Job(company, "Software Engineer", "https://example.com/1", "Seattle, WA", "test")
-        assert tracker._matches_criteria(job) is expected
+        assert tracker._matches_criteria(job) is expected, company
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
