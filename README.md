@@ -45,14 +45,15 @@ The workflow needs `contents: write` (declared in the workflow) to push the
 GitHub's own `schedule` trigger is best-effort: on this repository it has
 fired every 3–7 hours rather than hourly. The workflow keeps an hourly cron as
 a fallback, but for 15–30 minute checks trigger it from an external scheduler
-with `repository_dispatch`:
+through the `workflow_dispatch` API:
 
 1. Create a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new):
    resource owner `go-johnnyhe`, **Only select repositories → jobs**,
-   repository permission **Contents: Read and write** (Metadata: Read is added
-   automatically). Pick an expiration and note it.
+   repository permission **Actions: Read and write** and nothing else
+   (Metadata: Read is added automatically). The token can start workflows but
+   cannot read or change code. Pick an expiration and note it.
 2. At [cron-job.org](https://cron-job.org) create a job:
-   - URL: `https://api.github.com/repos/go-johnnyhe/jobs/dispatches`
+   - URL: `https://api.github.com/repos/go-johnnyhe/jobs/actions/workflows/check-jobs.yml/dispatches`
    - Schedule: every 15 minutes (or 30)
    - Advanced → Request method: `POST`
    - Headers:
@@ -60,23 +61,25 @@ with `repository_dispatch`:
      - `Accept: application/vnd.github+json`
      - `X-GitHub-Api-Version: 2022-11-28`
      - `Content-Type: application/json`
-   - Request body: `{"event_type": "check-jobs", "client_payload": {"mode": "auto"}}`
+   - Request body: `{"ref":"main","inputs":{"mode":"auto"}}`
 3. Test it from cron-job.org ("Test run"): GitHub answers `204 No Content`
-   and a run appears under **Actions → Check for New Jobs**.
+   and a run appears under **Actions → Check for New Jobs**. A `422` that
+   mentions `mode` means the `main` branch does not have this workflow's
+   `mode` input yet; a `403` or `404` means the token lacks Actions: write on
+   this repository.
 
 Equivalent curl:
 
 ```bash
-curl -X POST https://api.github.com/repos/go-johnnyhe/jobs/dispatches \
+curl -X POST https://api.github.com/repos/go-johnnyhe/jobs/actions/workflows/check-jobs.yml/dispatches \
   -H "Authorization: Bearer $TOKEN" \
   -H "Accept: application/vnd.github+json" \
   -H "X-GitHub-Api-Version: 2022-11-28" \
-  -d '{"event_type":"check-jobs","client_payload":{"mode":"auto"}}'
+  -d '{"ref":"main","inputs":{"mode":"auto"}}'
 ```
 
-`repository_dispatch` runs the workflow from the default branch. Runs share a
-concurrency group, so overlapping triggers queue instead of racing. The
-repository is public, so Actions minutes are free.
+Runs share a concurrency group, so overlapping triggers queue instead of
+racing. The repository is public, so Actions minutes are free.
 
 ### Scan modes
 
@@ -87,7 +90,7 @@ repository is public, so Actions minutes are free.
 | `full` | Job lists and all career pages (a few minutes) |
 
 Pick a mode for a manual run under **Actions → Check for New Jobs → Run
-workflow**, or set `client_payload.mode` in the dispatch body.
+workflow**, or set `inputs.mode` in the dispatch body.
 
 ## Assistant webhook
 
@@ -127,9 +130,20 @@ New jobs are POSTed as JSON, at most `ASSISTANT_BATCH_SIZE` (25) per request:
   header) is stable per batch, so the receiver can drop retried duplicates.
 - Any 2xx response marks the batch delivered. 408, 429 and 5xx responses and
   connection errors are retried up to 4 attempts with exponential backoff
-  (2 s, 4 s, 8 s), honoring `Retry-After` up to 60 s. Other 4xx responses are
-  not retried. Undelivered jobs stay pending and are retried on the next run
-  for up to `ASSISTANT_MAX_PENDING_AGE_HOURS` (one week).
+  (2 s, 4 s, 8 s), honoring `Retry-After` up to 60 s. Undelivered jobs stay
+  pending and are retried on the next run for up to
+  `ASSISTANT_MAX_PENDING_AGE_HOURS` (one week).
+- A 400, 413, or 422 response is treated as a rejection of the batch's
+  content: the batch is split in half and each half is resent, down to single
+  jobs, so one bad job does not hold back the others. A job rejected on its
+  own on `ASSISTANT_MAX_REJECTIONS` (3) runs is retired with the reason
+  `assistant_rejected:HTTP <status>` (shown by `--list-recent`). Other
+  failures (401, 403, 404, retries exhausted) stop assistant delivery for
+  that run and leave everything pending.
+- Webhook errors are logged as the exception type and HTTP status only, so
+  webhook URLs, keys, and response bodies never appear in Action logs.
+- If the assistant step crashes, Discord delivery still runs and the run is
+  marked failed.
 
 Send a test event with `python main.py --test-assistant-webhook`.
 
@@ -144,13 +158,39 @@ requires U.S. citizenship, 🎓 advanced degree) and from description text for
 Lever and Ashby (included in their APIs) and Greenhouse and Workday (fetched
 for new jobs only, at most `max_description_fetches_per_run`).
 
-Jobs are dropped when they clearly state they will not sponsor visas, require
-U.S. citizenship or permanent residency, require a security clearance, or
-exclude F-1/J-1/OPT/CPT candidates. Negated phrases ("no security clearance
-required") and statements of sponsorship ("we sponsor visas") are not treated
-as exclusions; postings with conflicting statements are kept as `unknown`.
+Jobs are dropped when they clearly state they will not sponsor work visas,
+require U.S. citizenship or permanent residency (including ITAR "U.S. person"
+requirements), require a security clearance, or exclude F-1 OPT/CPT
+candidates. To avoid false drops from boilerplate:
+
+- "Sponsor" only counts when the same sentence has an immigration word (visa,
+  H-1B, work authorization, immigration, citizenship, OPT/CPT, or
+  "sponsorship" itself), so "unable to sponsor relocation costs" is ignored.
+  Export-control footers ("may require sponsorship of an export license")
+  are ignored even though they say "sponsorship".
+- The EPPA footer ("Employee Polygraph Protection Act") and EEO statements
+  ("citizens and permanent residents are encouraged to apply") are ignored;
+  "citizens, permanent residents, or anyone authorized to work (including
+  F-1 OPT)" is not a citizenship requirement.
+- A posting that refuses H-1B sponsorship but accepts OPT/STEM OPT or CPT is
+  kept as `unknown` with a note. J-1-only statements are ignored.
+- "Preferred" downgrades only the requirement it is attached to, so "TS/SCI
+  required; Python preferred" still drops.
+- Negated phrases ("no security clearance required") and statements of
+  sponsorship ("we sponsor visas") are not treated as exclusions; postings
+  with conflicting statements are kept as `unknown`.
+
 Experience requirements are flagged, not dropped. Every rule, threshold, and
 pattern is in `SCREENING` and the `*_PATTERNS` lists in `config.py`.
+
+Screened-out jobs record a `screening_version` (a hash of those rules). When
+the rules change, previously dropped jobs that are still listed are screened
+again on the next run, and jobs that now pass are queued for both channels.
+
+List companies match `COMPANIES` / `COMPANY_ALIASES` by whole leading words
+plus corporate suffixes (Inc, LLC, Labs, AI, Technologies, ...), so "Snap Inc"
+matches Snap but "Snap Finance", "Coherent", and "City of San Francisco" do
+not match Snap, Cohere, or Cisco.
 
 ## State and delivery guarantees
 
@@ -159,8 +199,17 @@ The SQLite database is a per-run working copy. The durable record is
 before each run and commits it back afterward (even when the run fails),
 using a non-force push so concurrent writers cannot silently overwrite each
 other. Jobs are written one per line, so each commit shows exactly which jobs
-changed.
+changed, and a run that changes nothing writes an identical file and makes no
+commit.
 
+- If the push is rejected because another run pushed first, the script
+  fetches the branch, merges the two state files (a delivered mark on either
+  side wins), and pushes again. It never force-pushes and stops with an error
+  if the remote file cannot be merged.
+- The state file is rewritten after every delivered Discord or assistant
+  batch, so a run that times out or is cancelled still saves what it sent.
+  The tracker step has a 15-minute timeout inside the 20-minute job so the
+  save step always gets to run.
 - A job is marked delivered on a channel only after that channel accepted it.
 - Discord sends at most `MAX_PENDING_JOBS_TO_NOTIFY` (50) jobs per run, oldest
   first; the rest stay pending for the next run and the first message says
@@ -170,15 +219,21 @@ changed.
   Google) or canonical URL plus title, and is sent once.
 - The first scan of a new source with more than `NEW_SOURCE_BASELINE_MAX_JOBS`
   (5) unseen jobs is recorded without notifying, so adding a list does not
-  flood Discord. A brand-new install records everything on its first run.
+  flood Discord. Jobs in that scan posted within
+  `BASELINE_DELIVER_POSTED_WITHIN_HOURS` (48) are still delivered. A
+  brand-new install records everything on its first run.
+- Each job list has its own health record, so one broken list does not mark
+  the others unhealthy. The career-page scan time is recorded only when the
+  career scan was healthy; otherwise the next `auto` run retries it.
 - Jobs no longer listed for `STATE_RETENTION_DAYS` (180) are pruned.
 
 **Migration from the cache-only setup:** on the first run the state branch
 does not exist yet, so the workflow restores the last `jobs.db` from the
 Actions cache. Existing rows are migrated in place: their Discord status is
 kept, they are not replayed to the assistant, and every source that already
-had jobs counts as scanned. That run creates the state branch; the cache is
-only a fallback afterward. If neither exists, the run is treated as a fresh
+had jobs counts as scanned. That run creates the state branch. The workflow
+no longer saves to the cache; the old cache entry is only read when the
+state branch is missing. If neither exists, the run is treated as a fresh
 install.
 
 ## Commands
