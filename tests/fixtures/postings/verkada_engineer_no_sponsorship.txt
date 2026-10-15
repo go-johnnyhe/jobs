@@ -1,0 +1,39 @@
+# company: Verkada
+# title: Solutions Engineer, Auckland
+# location: New Zealand
+# source: https://job-boards.greenhouse.io/verkada/jobs/5207764007 (Greenhouse job 5207764007, fetched 2026-10-14)
+
+Who We Are
+Verkada is transforming how organizations protect their people and places with an integrated, privacy-sensitive AI-powered platform that includes solutions for video security, access control, air quality sensors, alarms, intercoms, and visitor management.
+We’ve got serious momentum in the market: more than 30,000 customers (including 100+ of the Fortune 500), a $5.8B valuation, more than $1 billion in annualized bookings, and backing from CapitalG, Sequoia Capital, General Catalyst, Felicis Ventures, Next47 and more. Physical AI is one of the most consequential technology shifts of our time, and Verkada is at the center of it.
+You can look at all kinds of communities to see our platform’s impact in the world. It's the retailer that uses our agentic AI to deter theft before it happens. The warehouse that uses AI-powered alerts to make sure its team is protected on the floor with proper PPE. The school that’s alerted to a threat in real-time and triggers a lockdown in seconds, not minutes. We’re rapidly scaling this impact: today, more than 2 million Verkada devices are deployed across 170+ countries.
+About the Role
+Verkada is looking for a Solution Engineer in Auckland with expert experience in Cloud Security, IoT Systems, Networking, Linux systems, Security Surveillance and Access Control. You'll partner directly with the Account Executives to expand the Verkada footprint upmarket into Fortune 500 companies. Responsibilities include directly interfacing with customers/partners and stakeholders throughout the sales process, analysing business and technical requirements, overcoming technical objections, assisting customers in designing deployments with Verkada products and providing technical assistance to territory account reps. The ideal candidate will be highly motivated, able to learn quickly and work independently while making impactful results for the company.
+This role is currently remote, but candidates must be based in Auckland, New Zealand. The role will transition to a hybrid working model once an office is established in Auckland.
+What You'll Do
+Be the trusted technical advisor to key customer stakeholders: CTOs, CISOs, IT Executives, Security Engineers, Network Engineers, Head of Physical Security, etc
+Utilize your technical expertise to understand and analyse customer requirements to formulate and design system solutions.
+Collaborate with the Sales team to assess and qualify customer opportunities, and translate business needs into clear specifications to contribute to the design of effective technical solutions
+Lead product demonstrations and deliver engaging presentations tailored to both technical and non-technical audiences
+Act as the Verkada technical Subject Matter Expert, collaborating closely with other departments such as Product, Support, Marketing, and Enablement
+25% travel may be required
+What You Bring
+Bachelor's degree in Information and Computer Technology, Cybersecurity or related Engineering degree from an accredited university
+Demonstrate a solid understanding of TCP/IP, TLS, DNS, DHCP, NAT, VLANs and L2 devices
+Exhibit outstanding written and verbal communication skills, along with effective presentation abilities
+Excellent account management, follow-through, and attention to detail
+Entrepreneurial and positive attitude with a strong desire to learn
+Experience working with IT infrastructure, Linux operating systems, APIs, Python, and other coding languages preferred
+Industry certifications are a plus: Network +, Security+, CCNA, AWS Solutions Architect, etc.
+New Zealand Employee Benefits
+Verkada is committed to fostering a workplace environment that prioritises the holistic health and wellbeing of our employees and their families by offering comprehensive wellness perks, benefits, and resources. Our benefits and perks programs include, but are not limited to:
+Flexible allowances to purchase medical, life, and disability insurance that meet your individual needs
+Paid parental leave policy & fertility benefits
+Time off to relax and recharge through our paid holidays, firmwide extended holidays, generous time off, and personal sick time
+Professional development stipend
+Wellness/fitness benefits
+Additional Information
+You must be independently authorised to work in New Zealand. We are unable to sponsor or take over sponsorship of an employment visa for this role, at this time.
+Verkada Is An Equal Opportunity Employer
+As an equal opportunity employer, Verkada is committed to providing employment opportunities to all individuals. All applicants for positions at Verkada will be treated without regard to race, color, ethnicity, religion, sex, gender, gender identity and expression, sexual orientation, national origin, disability, age, marital status, veteran status, pregnancy, or any other basis prohibited by applicable law.
+Your application will be handled in accordance with our Candidate Privacy Policy.

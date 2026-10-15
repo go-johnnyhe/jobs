@@ -34,7 +34,7 @@ class TestInsertAndDedup:
         assert db.get_stats()["total_jobs"] == 2
 
     def test_invalid_batch_rolls_back_all_inserts(self, db):
-        invalid = _make_job(company=None)
+        invalid = _make_job(company=None, url="https://example.com/invalid")
         with pytest.raises(sqlite3.IntegrityError):
             db.add_jobs([_make_job(), invalid])
         assert db.get_stats()["total_jobs"] == 0

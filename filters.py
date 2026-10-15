@@ -4,6 +4,7 @@ import re
 
 from config import (
     BLOCKED_LOCATIONS,
+    COMPANY_SUFFIX_WORDS,
     PREFERRED_LOCATIONS,
     ROLE_KEYWORDS,
     SENIORITY_EXCLUSIONS,
@@ -46,6 +47,34 @@ _NEW_GRAD_RE = re.compile(
     r"(?<!\w)(?:" + "|".join(map(re.escape, TITLE_KEYWORDS)) + r")(?!\w)",
     re.IGNORECASE,
 )
+
+
+def _company_words(name: str) -> list[str]:
+    spaced = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", name or "")
+    words = re.findall(r"[a-z0-9]+", spaced.lower())
+    return words[1:] if words[:1] == ["the"] else words
+
+
+def compact_company_names(names) -> frozenset[str]:
+    """Targets reduced to letters and digits: "Fly.io" -> "flyio", "Two Sigma" -> "twosigma"."""
+    return frozenset(re.sub(r"[^a-z0-9]", "", name.lower()) for name in names)
+
+
+def company_matches(company: str, compact_targets: frozenset[str]) -> bool:
+    """Whether a listed company name is one of the targets.
+
+    The leading whole words must spell a target, and any words after it must
+    be corporate suffixes: "CockroachLabs", "Citadel Securities", and "OpenAI"
+    match, but "Snap Finance", "Coherent Solutions" (Cohere), "Mintel"
+    (Intel), and "City of San Francisco" (Cisco) do not.
+    """
+    words = _company_words(company)
+    for split in range(1, len(words) + 1):
+        if "".join(words[:split]) in compact_targets and all(
+            word in COMPANY_SUFFIX_WORDS for word in words[split:]
+        ):
+            return True
+    return False
 
 
 def matches_location(location: str) -> bool:

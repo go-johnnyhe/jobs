@@ -1,14 +1,17 @@
 """GitHub repository tracker for job listings."""
 
+from collections import Counter
 from typing import Optional
 
 import requests
-from bs4 import BeautifulSoup
 
 from config import GITHUB_REPOS, TARGET_COMPANIES
-from filters import has_role_keyword, matches_job_criteria
+from filters import compact_company_names, company_matches, has_role_keyword, matches_job_criteria
 from http_client import create_session
 from models import Job, ScrapeResult
+from posted_dates import normalize_posted_date
+from screening import screen_job
+from sources.list_parsers import ListingRow, best_url, parse_listing_tables
 
 
 class GitHubTracker:
@@ -20,18 +23,26 @@ class GitHubTracker:
         self.last_attempted_repos = 0
         self.last_successful_repos = 0
         self.last_repo_results: dict[str, ScrapeResult] = {}
+        self.screen_counts: Counter = Counter()
+        self.targets = compact_company_names(TARGET_COMPANIES)
         self.session.headers.update({
             "Accept": "application/vnd.github.v3.raw",
             "User-Agent": "JobTracker/1.0",
         })
 
     def fetch_jobs_with_status(self) -> tuple[list[Job], bool, str]:
-        """Fetch jobs and return (jobs, healthy, error_summary)."""
+        """Fetch jobs and return (jobs, healthy, error_summary).
+
+        The source is healthy when at least one repository parsed. Per-list
+        health is in last_repo_results, which main.py records and alerts on
+        separately for each list.
+        """
         all_jobs = []
         self.last_errors = []
         self.last_attempted_repos = 0
         self.last_successful_repos = 0
         self.last_repo_results = {}
+        self.screen_counts = Counter()
 
         for repo_config in GITHUB_REPOS:
             self.last_attempted_repos += 1
@@ -44,7 +55,7 @@ class GitHubTracker:
             elif result.error:
                 self.last_errors.append(result.error)
 
-        healthy = self.last_attempted_repos == 0 or self.last_successful_repos > 0
+        healthy = self.last_successful_repos > 0
         error_summary = "; ".join(self.last_errors[:3])
         return all_jobs, healthy, error_summary
 
@@ -77,26 +88,16 @@ class GitHubTracker:
             )
 
     def _parse_simplify_readme(self, content: str, *, repo_name: str) -> ScrapeResult:
-        """Parse the SimplifyJobs README.md format (HTML tables)."""
+        """Parse a job-list README (HTML or Markdown tables)."""
         jobs = []
-        candidate_count = 0
-        soup = BeautifulSoup(content, "html.parser")
+        rows = parse_listing_tables(content)
 
-        for table in soup.find_all("table"):
-            company = ""
-            for row in table.find_all("tr"):
-                cells = row.find_all("td")
-                if len(cells) < 4:
-                    continue
-                candidate_count += 1
-                company_text = cells[0].get_text(" ", strip=True)
-                if company_text not in {"", "↳", "↪"}:
-                    company = company_text
-                job = self._parse_html_row(cells, company=company, source=repo_name)
-                if job and self._matches_criteria(job):
-                    jobs.append(job)
+        for row in rows:
+            job = self._job_from_row(row, source=repo_name)
+            if job and self._matches_criteria(job):
+                jobs.append(job)
 
-        if candidate_count == 0:
+        if not rows:
             return ScrapeResult(
                 status="parse_failure",
                 error=f"{repo_name}: no candidate job rows found",
@@ -104,44 +105,37 @@ class GitHubTracker:
 
         return ScrapeResult(
             jobs=jobs,
-            candidate_count=candidate_count,
+            candidate_count=len(rows),
             status="success" if jobs else "empty",
         )
 
-    def _parse_html_row(self, cells, *, company: str, source: str) -> Optional[Job]:
-        """Parse a complete row; the caller resolves repeated company cells."""
-        title = cells[1].get_text(" ", strip=True)
-        location = cells[2].get_text("; ", strip=True)
-        if not company or not title or "🔒" in cells[3].get_text():
+    def _job_from_row(self, row: ListingRow, *, source: str) -> Optional[Job]:
+        """Build a job from an open row; the parser resolves continuation rows."""
+        if not row.company or not row.title or row.closed:
             return None
-        links = [
-            link["href"] for link in cells[3].find_all("a", href=True)
-            if link["href"].startswith(("https://", "http://"))
-        ]
-        if not links:
+        url = best_url(row)
+        if not url:
             return None
-        url = next((href for href in links if "simplify.jobs" not in href), links[0])
         return Job(
-            company=company,
-            title=title,
+            company=row.company,
+            title=row.title,
             url=url,
-            location=location,
+            location=row.location,
             source=source,
-            date_posted=cells[4].get_text(strip=True) if len(cells) > 4 else "",
+            date_posted=normalize_posted_date(row.age) if row.age else "",
+            list_markers=row.markers,
         )
 
     def _matches_criteria(self, job: Job) -> bool:
-        """Check if a job matches our filtering criteria."""
-        # Check if company is in our target list
-        # Short targets (len <= 2) require exact match to avoid false positives
-        # (e.g. "f5" matching "Flexport")
-        company_lower = job.company.lower()
-        company_match = any(
-            (company_lower == target if len(target) <= 2 else target in company_lower)
-            for target in TARGET_COMPANIES
-        )
-
-        if not company_match:
+        """Check company, role, shared filters, then sponsorship screening."""
+        if not company_matches(job.company, self.targets):
             return False
 
-        return has_role_keyword(job.title) and matches_job_criteria(job)
+        if not (has_role_keyword(job.title) and matches_job_criteria(job)):
+            return False
+
+        drop_reason = screen_job(job)
+        if drop_reason:
+            self.screen_counts[drop_reason] += 1
+            return False
+        return True

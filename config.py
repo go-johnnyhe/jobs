@@ -190,6 +190,47 @@ COMPANIES = {
         "url": "https://ffive.wd5.myworkdayjobs.com/f5jobs",
         "ats": "workday",
     },
+    "Remitly": {
+        "url": "https://remitly.wd5.myworkdayjobs.com/Remitly_Careers",
+        "ats": "workday",
+    },
+    "T-Mobile": {
+        # The unfiltered feed is mostly retail roles and Workday caps its
+        # advertised total at 2000, so query the engineering subset instead.
+        "url": "https://tmobile.wd1.myworkdayjobs.com/External",
+        "ats": "workday",
+        "search_queries": ["software", "developer", "engineer"],
+    },
+    "Smartsheet": {
+        "url": "https://job-boards.greenhouse.io/smartsheet",
+        "ats": "greenhouse",
+        "ats_id": "smartsheet",
+    },
+    "Tanium": {
+        "url": "https://job-boards.greenhouse.io/tanium",
+        "ats": "greenhouse",
+        "ats_id": "tanium",
+    },
+    "Nintendo": {
+        "url": "https://job-boards.greenhouse.io/nintendo",
+        "ats": "greenhouse",
+        "ats_id": "nintendo",
+    },
+    "Outreach": {
+        "url": "https://jobs.lever.co/outreach",
+        "ats": "lever",
+        "ats_id": "outreach",
+    },
+    "Qumulo": {
+        "url": "https://jobs.ashbyhq.com/qumulo",
+        "ats": "ashby",
+        "ats_id": "qumulo",
+    },
+    "Truveta": {
+        "url": "https://job-boards.greenhouse.io/truveta",
+        "ats": "greenhouse",
+        "ats_id": "truveta",
+    },
     # High-Growth Startups
     "Flyio": {
         "url": "https://fly.io/jobs/",
@@ -559,13 +600,22 @@ COMPANIES = {
     },
 }
 
-# GitHub repositories to monitor
+# GitHub repositories to monitor. Both HTML-table and Markdown-table READMEs are
+# parsed by header name, so column order changes do not break parsing.
 GITHUB_REPOS = [
     {
         "owner": "SimplifyJobs",
         "repo": "New-Grad-Positions",
         "branch": "dev",
         "file": "README.md",
+    },
+    {
+        # speedyapply renamed 2026-SWE-College-Jobs to this repository; the old
+        # name redirects here. NEW_GRAD_USA.md holds the US new-grad tables.
+        "owner": "speedyapply",
+        "repo": "2027-SWE-College-Jobs",
+        "branch": "main",
+        "file": "NEW_GRAD_USA.md",
     },
 ]
 
@@ -658,12 +708,17 @@ CAREER_CONTENT_EXCLUSIONS = [
 # Location preferences (empty list = all locations)
 PREFERRED_LOCATIONS = [
     "seattle",
+    "bellevue",
+    "redmond",
+    "kirkland",
     "remote",
     "united states",
     "usa",
     "us",
     "san francisco",
+    "sf",
     "new york",
+    "nyc",
     "mountain view",
     "palo alto",
     "sunnyvale",
@@ -690,7 +745,17 @@ COMPANY_ALIASES = {
     "Riot Games": ["riot"],
     "Navan": ["tripactions"],
     "xAI": ["x.ai"],
+    "T-Mobile": ["tmobile"],
 }
+
+# Words that may follow a target name in a job list's company column and
+# still mean the same company ("Grafana Labs", "Citadel Securities").
+COMPANY_SUFFIX_WORDS = frozenset({
+    "inc", "incorporated", "llc", "ltd", "limited", "plc", "corp", "corporation",
+    "co", "company", "labs", "lab", "group", "securities", "ai", "technologies",
+    "technology", "tech", "software", "systems", "holdings", "platforms",
+    "international", "global", "us", "usa",
+})
 
 # Auto-derived from COMPANIES keys + COMPANY_ALIASES values
 TARGET_COMPANIES = sorted(set(
@@ -896,5 +961,234 @@ SENIORITY_EXCLUSION_PATTERNS = [
     r'\b[2-9]\+?\s*years?\b',                            # 2+ years experience
 ]
 
-# SQLite database path
-DATABASE_PATH = os.path.join(os.path.dirname(__file__), "jobs.db")
+# SQLite database path. The database is a working copy; durable state is the
+# JSON file passed with --state-file (committed to a state branch in CI).
+DATABASE_PATH = os.environ.get(
+    "JOB_TRACKER_DB",
+    os.path.join(os.path.dirname(__file__), "jobs.db"),
+)
+
+# ---------------------------------------------------------------------------
+# Visa sponsorship and seniority screening
+# ---------------------------------------------------------------------------
+# A job is dropped only when a rule below is enabled and the posting clearly
+# matches it. Everything else is kept and flagged with sponsorship
+# (no|unknown|yes) and seniority_flag (none|borderline|senior).
+SCREENING = {
+    "drop_no_sponsorship": True,
+    # "We can't sponsor visas, but OPT/CPT candidates are welcome" still
+    # drops: OPT runs out and the job would need H-1B sponsorship after it.
+    # Set False to keep those jobs (sponsorship "unknown", with a note).
+    "drop_no_sponsorship_with_opt": True,
+    "drop_citizenship_required": True,
+    "drop_clearance_required": True,
+    "drop_opt_ineligible": True,
+    # Description asks for at least this many years: seniority_flag=borderline.
+    "experience_flag_min_years": 2,
+    # At or above this, seniority_flag=senior. Set drop_senior_experience to
+    # drop those jobs instead of flagging them.
+    "experience_senior_min_years": 5,
+    "drop_senior_experience": False,
+    # Fetch descriptions for newly found career-page jobs whose list API does
+    # not include them (Greenhouse, Workday). Only new jobs are fetched.
+    "fetch_descriptions": True,
+    "max_description_fetches_per_run": 80,
+}
+
+# Markers used by the SimplifyJobs README legend.
+LIST_MARKERS = {
+    "🛂": "no_sponsorship",
+    "🇺🇸": "citizenship_required",
+    "🎓": "advanced_degree",
+}
+
+_NEGATION = (
+    r"(?:will\s+not|won'?t|can\s*not|can'?t|do\s+not|does\s+not|don'?t|doesn'?t"
+    r"|are\s+not|aren'?t|is\s+not|isn'?t|unable|not\s+able|not\s+in\s+a\s+position"
+    r"|no\s+longer)"
+)
+# J-1 is an exchange-visitor status, so "does not support J-1 visas" says
+# nothing about F-1 OPT.
+_STUDENT_VISA = r"(?:F-?1|(?-i:STEM\s+OPT|OPT|CPT)|student\s+visas?)"
+_STUDENT_WORK_AUTH = (
+    r"(?:F-?1|(?-i:STEM\s+OPT|OPT|CPT)|(?:curricular|optional)\s+practical\s+training)"
+)
+_US = r"\bu\.?\s?s\.?(?:a\.?)?"
+
+# Regular expressions are matched case-insensitively against title and
+# description text. A no-sponsorship match only counts when its sentence is
+# about immigration (IMMIGRATION_CONTEXT_PATTERN) and it is not sponsorship
+# for an export license or relocation, so "unable to sponsor relocation costs",
+# "Relocation sponsorship is not available", and "without sponsorship for an
+# export license" are ignored.
+IMMIGRATION_CONTEXT_PATTERN = (
+    r"\b(?:visas?|h-?1b|immigration|immigrant|work\s+(?:authori[sz]ation|permits?|eligibility)"
+    r"|employment\s+(?:authori[sz]ation|eligibility|sponsorship|visas?)"
+    r"|authori[sz]ed\s+to\s+work|right\s+to\s+work|green\s+cards?|permanent\s+residen\w*"
+    r"|citizenship|(?<!relocation[- ])sponsorship|F-?1|(?-i:OPT|CPT)"
+    r"|sponsor\w*\s+(?:candidates|applicants|individuals|employees|anyone|you|workers))\b"
+)
+EXPORT_LICENSE_SPONSORSHIP_PATTERN = (
+    r"\bsponsor(?:ship)?\s+(?:for|of)\s+(?:an?\s+|the\s+)?(?:[\w.]+\s+){0,2}?export\b"
+)
+RELOCATION_SPONSORSHIP_PATTERN = (
+    r"\brelocation[- ]sponsor"
+    r"|\bsponsor(?:ship)?\s+(?:for|of)\s+(?:an?\s+|the\s+)?relocation\b"
+    r"|\bsponsor\s+relocation\b"
+)
+
+NO_SPONSORSHIP_PATTERNS = [
+    _NEGATION + r"\s+(?:be\s+)?(?:able\s+)?(?:to\s+)?sponsor\b",
+    r"\b(?:visa\s+|immigration\s+)?sponsorship(?:\s+available)?\s*[:?]\s*"
+    r"(?:no\b|not\s+available|none\b|n/a\b|unavailable)",
+    _NEGATION + r"\s+(?:be\s+)?(?:able\s+)?(?:to\s+)?"
+    r"(?:offer|provide|support|sponsor|consider|accommodate|include)\w*\s+"
+    r"(?:[\w/.'-]+\s+){0,5}?(?:visa|sponsor|h-?1b|immigration)",
+    _NEGATION + r"\s+(?:be\s+)?(?:able\s+)?(?:to\s+)?"
+    r"(?:accept|consider|hire|employ|move\s+forward\s+with)\s+(?:any\s+)?"
+    r"(?:applicants?|candidates?|individuals?|anyone|persons?|people)\s+"
+    r"(?:who\s+(?:will\s+|may\s+|would\s+|currently\s+|now\s+)?(?:or\s+in\s+the\s+future\s+)?"
+    r"(?:require|need)s?|requiring|needing|that\s+(?:require|need)s?)\s+"
+    r"(?:[\w-]+\s+){0,3}?sponsorship",
+    r"\bno\s+(?:visa\s+|immigration\s+|employment\s+|h-?1b\s+)?sponsorship\b"
+    r"(?!\s+(?:is\s+)?(?:required|needed|necessary))",
+    r"\bsponsorship\s+(?:is\s+|will\s+)?(?:not|n't)\s+(?:be\s+)?"
+    r"(?:available|offered|provided|possible|supported|an\s+option)",
+    r"\bsponsorship\s+(?:is\s+)?unavailable\b",
+    r"(?<!with\sor\s)\bwithout\s+(?:the\s+)?(?:need\s+(?:for|of)\s+|requiring\s+"
+    r"|requirement\s+(?:for|of)\s+)?(?:(?:current\s+or\s+future|future|any)\s+)?"
+    r"(?:visa\s+|employer\s+|employment\s+|immigration\s+|company\s+|h-?1b\s+)?sponsorship",
+    r"\b(?:not\s+(?:be\s+)?eligible|ineligible|(?:does|do)\s+not\s+qualify)\s+for\s+"
+    r"(?:visa\s+|immigration\s+|h-?1b\s+|employment\s+)?sponsorship",
+    r"\b(?:must|does|do|will|should)\s+not\s+(?:now\s+or\s+in\s+the\s+future\s+)?"
+    r"(?:currently\s+)?require\s+(?:[\w-]+\s+){0,2}?sponsorship",
+    r"\b(?:requir(?:e|es|ing)|need(?:s|ing)?)\s+"
+    r"(?:(?:now\s+or\s+in\s+the\s+future|current\s+or\s+future|future|any)\s+)?"
+    r"(?:visa\s+|immigration\s+|employment\s+|employer\s+|h-?1b\s+)?"
+    r"sponsorship[^.;]{0,80}?\b(?:not\s+(?:be\s+)?eligible|ineligible"
+    r"|(?:will|can)\s*not\s+be\s+considered|not\s+be\s+considered)",
+]
+
+SPONSORSHIP_OFFERED_PATTERNS = [
+    r"\b(?:we|company|employer|they)\s+(?:will\s+|can\s+|do\s+|does\s+|are\s+able\s+to\s+"
+    r"|is\s+able\s+to\s+|happily\s+|gladly\s+)?sponsors?\s+(?:[\w-]+\s+){0,3}?"
+    r"(?:visas?|h-?1b|work\s+(?:visas?|authorization)|immigration|green\s+cards?)",
+    r"\b(?:visa|h-?1b|immigration)\s+sponsorship\s+(?:is\s+)?"
+    r"(?:available|offered|provided|possible|supported)\b",
+    r"\b(?:offers?|provides?|supports?|offering|providing)\s+"
+    r"(?:visa|h-?1b|immigration|work\s+visa)\s+sponsorship\b",
+    r"\bsponsorship\s+(?:is\s+)?(?:available|offered|provided)\b",
+    r"\b(?:open|willing)\s+to\s+sponsor",
+]
+
+CITIZENSHIP_REQUIRED_PATTERNS = [
+    _US + r"\s+citizen(?:ship)?\s+(?:is\s+|are\s+)?(?:required|mandatory|needed)",
+    # Also ITAR lists: "applicant must be a (i) U.S. citizen or national, ..."
+    r"\b(?:must|required\s+to|need\s+to)\s+(?:be|hold|have|possess)\s+(?:an?\s+)?"
+    r"(?:\(\w{1,4}\)\s+)?" + _US + r"\s+citizen",
+    r"\brequires?\s+" + _US + r"\s+citizenship\b",
+    r"\b" + _US + r"\s+citizens?\s+only\b",
+    r"\bonly\s+(?:open\s+to\s+)?" + _US + r"\s+citizens\b",
+    r"\b(?:green\s+card|permanent\s+resident)s?\s+(?:holders?\s+)?only\b",
+    r"\bmust\s+be\s+an?\s+" + _US + r"\s+person\b",
+]
+
+# Mentions that only restrict eligibility when their sentence also states a
+# requirement ("restricted to US citizens or lawful permanent residents"), not
+# in "U.S. citizens and permanent residents are encouraged to apply".
+CITIZENSHIP_MENTION_PATTERNS = [
+    r"\b(?:" + _US + r"\s+)?citizens?\s+(?:or|and|/)\s+(?:lawful\s+)?(?:" + _US
+    + r"\s+)?(?:permanent\s+residents?|green\s+card\s+holders?)\b",
+]
+
+# Statements that F-1 students on OPT/CPT can be hired. One of these overrides
+# a no-sponsorship, citizenship, or student-visa match in the same posting:
+# "cannot sponsor H-1B, but can support OPT" leaves sponsorship unknown.
+OPT_ELIGIBLE_PATTERNS = [
+    r"\b(?:can|will|do|does|are\s+able\s+to|is\s+able\s+to|happy\s+to|glad\s+to|we)\s+"
+    r"(?:also\s+|gladly\s+|happily\s+)?(?:support|accept|consider|hire|welcome|sponsor)\w*\s+"
+    r"(?:[\w/.'()-]+\s+){0,4}?" + _STUDENT_WORK_AUTH,
+    _STUDENT_WORK_AUTH + r"[^.;]{0,60}?\b(?:are|is)\s+(?:also\s+)?"
+    r"(?:eligible|welcome|accepted|supported|considered)\b",
+    r"\b(?:work|employment)\s+authori[sz]ation\s*[(,]?\s*(?:including|incl\.?|such\s+as|e\.g\.,?)"
+    r"\s+(?:[\w-]+\s+){0,2}?" + _STUDENT_WORK_AUTH,
+]
+
+# Only applied to titles, where a bare mention implies a requirement.
+TITLE_CITIZENSHIP_PATTERNS = [
+    r"\b" + _US + r"\s+citizen(?:ship)?\b",
+    r"\bcitizenship\s+required\b",
+]
+
+CLEARANCE_REQUIRED_PATTERNS = [
+    r"\bts\s*/\s*sci\b",
+    r"\btop[\s-]+secret\b",
+    r"\b(?:secret|security|government|dod|federal)\s+clearance\b",
+    r"\bclearance\s+(?:is\s+)?required\b",
+    r"\b(?:active|current)\s+(?:ts|secret|clearance)\b",
+    # Not the "Employee Polygraph Protection Act (EPPA)" poster in EEO footers.
+    r"(?<!employee\s)\bpolygraph\b(?!\s+protection)",
+]
+
+OPT_INELIGIBLE_PATTERNS = [
+    _STUDENT_VISA + r"[^.;]{0,60}?\b(?:not\s+(?:be\s+)?eligible|ineligible"
+    r"|not\s+(?:be\s+)?(?:accepted|considered|supported)"
+    r"|cannot\s+be\s+(?:accepted|considered|supported))",
+    r"\b(?:not|unable\s+to|cannot|can'?t|do\s+not|does\s+not|will\s+not|won'?t)\s+"
+    r"(?:accept|consider|support|hire|sponsor)\w*\s+(?:[\w/.'-]+\s+){0,4}?" + _STUDENT_VISA,
+    r"\b(?:not\s+(?:be\s+)?eligible|ineligible)\b[^.;]{0,40}?" + _STUDENT_VISA,
+]
+
+# ---------------------------------------------------------------------------
+# Delivery
+# ---------------------------------------------------------------------------
+# Discord: at most this many jobs per run. The rest stay pending and are sent
+# by later runs, oldest first. Nothing is marked delivered unless it was sent.
+MAX_PENDING_JOBS_TO_NOTIFY = 50
+# Pending jobs older than this are retired without being sent. None keeps
+# them pending until delivered.
+DISCORD_MAX_PENDING_AGE_HOURS = None
+# A job Discord refuses on its own (HTTP 400/413, e.g. an embed it will not
+# accept) on this many runs is retired with suppressed_reason
+# "discord_rejected:HTTP <status>". Refused batches are split so one bad job
+# does not hold back the rest.
+DISCORD_MAX_REJECTIONS = 3
+
+ASSISTANT_WEBHOOK_URL = os.environ.get("ASSISTANT_WEBHOOK_URL", "")
+ASSISTANT_WEBHOOK_KEY = os.environ.get("ASSISTANT_WEBHOOK_KEY", "")
+ASSISTANT_BATCH_SIZE = 25
+ASSISTANT_MAX_JOBS_PER_RUN = 200
+# Bounds the backlog sent when the assistant webhook is first configured or
+# after a long outage.
+ASSISTANT_MAX_PENDING_AGE_HOURS = 168
+ASSISTANT_MAX_ATTEMPTS = 4
+# A job the webhook rejects (HTTP 400/413/422) on this many runs is retired
+# with suppressed_reason "assistant_rejected:HTTP <status>". Rejected batches
+# are split so one bad job does not hold back the rest.
+ASSISTANT_MAX_REJECTIONS = 3
+ASSISTANT_BACKOFF_SECONDS = 2.0
+ASSISTANT_MAX_RETRY_AFTER_SECONDS = 60.0
+ASSISTANT_TIMEOUT_SECONDS = 20
+# No new assistant batch starts after this many seconds in one run, so a slow
+# receiver (long Retry-After waits) cannot hit the tracker step's 15-minute
+# timeout. Discord is sent first and does not wait on the assistant.
+ASSISTANT_MAX_SECONDS_PER_RUN = 300
+
+# ---------------------------------------------------------------------------
+# Scheduling and durable state
+# ---------------------------------------------------------------------------
+# With --mode auto, the career-page scrape runs only when the last full scan
+# is older than this. List repositories are checked on every run.
+FULL_SCAN_INTERVAL_MINUTES = 120
+
+# The first successful scan of a list repository or career company that has
+# never been scanned is recorded without notifying when it yields more than
+# this many unseen jobs. This stops newly added sources from flooding Discord.
+NEW_SOURCE_BASELINE_MAX_JOBS = 5
+# Jobs in such a first scan whose posted date is within this many hours are
+# delivered anyway: they are new postings, not the source's backlog.
+BASELINE_DELIVER_POSTED_WITHIN_HOURS = 48
+
+# Delivered jobs that no source has listed for this many days are pruned from
+# the state file.
+STATE_RETENTION_DAYS = 180
