@@ -33,9 +33,9 @@ class GitHubTracker:
     def fetch_jobs_with_status(self) -> tuple[list[Job], bool, str]:
         """Fetch jobs and return (jobs, healthy, error_summary).
 
-        The source is healthy only when every configured repository parsed,
-        so a broken secondary list surfaces as a source alert. Jobs from the
-        repositories that did parse are still returned.
+        The source is healthy when at least one repository parsed. Per-list
+        health is in last_repo_results, which main.py records and alerts on
+        separately for each list.
         """
         all_jobs = []
         self.last_errors = []
@@ -55,7 +55,7 @@ class GitHubTracker:
             elif result.error:
                 self.last_errors.append(result.error)
 
-        healthy = self.last_successful_repos == self.last_attempted_repos
+        healthy = self.last_successful_repos > 0
         error_summary = "; ".join(self.last_errors[:3])
         return all_jobs, healthy, error_summary
 

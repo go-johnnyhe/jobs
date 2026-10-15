@@ -196,7 +196,7 @@ def test_marker_drop_can_be_disabled(monkeypatch):
     assert result.jobs[0].screening_notes == ["list marker: does not offer sponsorship"]
 
 
-def test_one_failing_repo_marks_source_unhealthy_but_keeps_other_jobs(monkeypatch):
+def test_one_failing_repo_does_not_mark_the_whole_source_unhealthy(monkeypatch):
     from sources import github_tracker
     monkeypatch.setattr(github_tracker, "GITHUB_REPOS", [
         {"owner": "a", "repo": "one", "branch": "main", "file": "README.md"},
@@ -213,8 +213,10 @@ def test_one_failing_repo_marks_source_unhealthy_but_keeps_other_jobs(monkeypatc
     monkeypatch.setattr(tracker, "_fetch_from_repo", fake_fetch)
     jobs, healthy, error = tracker.fetch_jobs_with_status()
     assert jobs == [job]
-    assert healthy is False
+    assert healthy is True
     assert error == "b/two: 404"
     assert set(tracker.last_repo_results) == {"a/one", "b/two"}
+    assert tracker.last_repo_results["a/one"].healthy is True
+    assert tracker.last_repo_results["b/two"].healthy is False
     assert tracker.last_repo_results["a/one"].scanned is True
     assert tracker.last_repo_results["b/two"].scanned is False

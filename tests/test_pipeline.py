@@ -474,6 +474,7 @@ class Feeds:
         self.lists = {SIMPLIFY: [], SPEEDY: []}
         self.failing_lists = set()
         self.careers = {"Acme": []}
+        self.careers_healthy = True
         self.career_calls = 0
 
 
@@ -510,7 +511,7 @@ def install_fakes(monkeypatch, feeds, discord, assistant):
                     jobs=list(company_jobs), candidate_count=5, status="success",
                 )
                 jobs.extend(company_jobs)
-            return jobs, True, ""
+            return jobs, feeds.careers_healthy, "" if feeds.careers_healthy else "too many failures"
 
     monkeypatch.setattr(main, "GitHubTracker", FakeTracker)
     monkeypatch.setattr(main, "CareerScraper", FakeScraper)
@@ -640,6 +641,8 @@ def test_new_list_is_baselined_and_failed_list_is_not(monkeypatch, tmp_path):
     storage = JobStorage(str(tmp_path / "check.db"))
     main.load_state_file(state, storage)
     assert storage.baselined_units() == {SIMPLIFY, "careers:Acme"}
+    health = {row["source"]: row["consecutive_failures"] for row in storage.export_state()["source_health"]}
+    assert health == {f"github:{SIMPLIFY}": 0, f"github:{SPEEDY}": 1, "careers": 0}
 
     # The list comes back with a big backlog: recorded silently.
     feeds.failing_lists = set()
@@ -754,3 +757,23 @@ def test_dry_run_sends_and_marks_nothing(monkeypatch, tmp_path, capsys):
     assert len(assistant.payloads) == 1
     assert len(storage.get_pending("discord")) == 1
     assert len(storage.get_pending("assistant")) == 1
+
+
+def test_unhealthy_career_scan_is_retried_on_the_next_auto_run(monkeypatch, tmp_path):
+    feeds = Feeds()
+    install_fakes(monkeypatch, feeds, RecordingDiscord(), RecordingAssistant())
+    state = str(tmp_path / "state.json")
+
+    def run(name):
+        return run_main(monkeypatch, "--db", str(tmp_path / f"{name}.db"), "--state-file", state, "--mode", "auto")
+
+    feeds.careers_healthy = False
+    assert run("a") == 0
+    assert "last_full_scan_at" not in json.loads(open(state, encoding="utf-8").read())["meta"]
+    assert run("b") == 0
+    assert feeds.career_calls == 2
+
+    feeds.careers_healthy = True
+    assert run("c") == 0
+    assert run("d") == 0
+    assert feeds.career_calls == 3

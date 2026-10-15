@@ -753,12 +753,14 @@ def _run_tracker(args, storage: JobStorage, notifier: DiscordNotifier, assistant
     if scan_lists:
         print("Fetching from GitHub repositories...")
         github_tracker = GitHubTracker()
-        github_jobs, github_healthy, github_error = github_tracker.fetch_jobs_with_status()
+        github_jobs, _github_healthy, _github_error = github_tracker.fetch_jobs_with_status()
         print(f"  Found {len(github_jobs)} matching jobs from GitHub\n")
         all_jobs.extend(github_jobs)
-        source_statuses.append(("github", github_healthy, github_error))
         summary["screened_at_source"].update(github_tracker.screen_counts)
         for repo, result in github_tracker.last_repo_results.items():
+            # Each list has its own health record and alerts, so one broken
+            # list does not report the others as failing.
+            source_statuses.append((f"github:{repo}", result.healthy, result.error))
             summary["lists"][repo] = {
                 "candidates": result.candidate_count,
                 "matched": len(result.jobs),
@@ -779,7 +781,10 @@ def _run_tracker(args, storage: JobStorage, notifier: DiscordNotifier, assistant
             "healthy": career_scraper.last_successful_companies,
             "matched": len(career_jobs),
         }
-        storage.set_meta(META_LAST_FULL_SCAN, run_timestamp)
+        if careers_healthy:
+            storage.set_meta(META_LAST_FULL_SCAN, run_timestamp)
+        else:
+            print("Career scan was unhealthy; auto mode will scan career pages again next run")
 
     _update_source_health(
         storage,
