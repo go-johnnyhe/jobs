@@ -85,6 +85,39 @@ def test_restore_save_cycle(repos, tmp_path):
     assert git("status", "--porcelain", cwd=clone) == ""
 
 
+@pytest.mark.parametrize("failing", ["hash-object", "mktree", "commit-tree"])
+def test_failed_git_step_never_deletes_the_branch(repos, tmp_path, failing):
+    # An empty object id would push ":refs/heads/job-tracker-state",
+    # which deletes the branch.
+    remote, work = repos
+    output = tmp_path / "output"
+    state = tmp_path / "state.json"
+    state.write_text('{"jobs": [1]}\n')
+    assert script("save", state, work, output).returncode == 0
+    tip = git("rev-parse", "job-tracker-state", cwd=remote)
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake_git = bin_dir / "git"
+    fake_git.write_text(
+        "#!/usr/bin/env bash\n"
+        f'if [[ "$1" == "{failing}" ]]; then echo "fatal: simulated" >&2; exit 128; fi\n'
+        f'exec {shutil.which("git")} "$@"\n'
+    )
+    fake_git.chmod(0o755)
+    state.write_text('{"jobs": [1, 2]}\n')
+    result = subprocess.run(
+        ["bash", str(SCRIPT), "save", str(state)],
+        cwd=work, capture_output=True, text=True, timeout=60,
+        env={**os.environ, "GITHUB_OUTPUT": str(output),
+             "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"},
+    )
+    assert result.returncode != 0
+    assert f"git {failing} failed; not pushing state" in result.stderr
+    assert "Saved state" not in result.stdout
+    assert git("rev-parse", "job-tracker-state", cwd=remote) == tip
+
+
 def test_save_rejects_invalid_json(repos, tmp_path):
     _remote, work = repos
     state = tmp_path / "state.json"

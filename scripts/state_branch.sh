@@ -22,6 +22,18 @@ export GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-41898282+github-actions[bot]@users.
 export GIT_COMMITTER_NAME="${GIT_COMMITTER_NAME:-$GIT_AUTHOR_NAME}"
 export GIT_COMMITTER_EMAIL="${GIT_COMMITTER_EMAIL:-$GIT_AUTHOR_EMAIL}"
 
+die() {
+  echo "$1" >&2
+  exit 1
+}
+
+# Exit unless $1 is a full object id. commit_and_push runs as an `if`
+# condition, where set -e does not apply, and pushing an empty commit id as
+# ":refs/heads/<branch>" would delete the state branch.
+require_oid() {
+  [[ "$1" =~ ^[0-9a-f]{40}([0-9a-f]{24})?$ ]] || die "git $2 failed; not pushing state"
+}
+
 output() {
   if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     echo "$1" >> "$GITHUB_OUTPUT"
@@ -91,11 +103,15 @@ commit_and_push() {
     "state.json records every job seen and whether it was delivered to Discord" \
     "and to the assistant webhook. Do not edit while the workflow is running." \
     | git hash-object -w --stdin)"
+  require_oid "$state_blob" hash-object
+  require_oid "$readme_blob" hash-object
   tree="$(printf '100644 blob %s\tREADME.md\n100644 blob %s\tstate.json\n' \
     "$readme_blob" "$state_blob" | git mktree)"
+  require_oid "$tree" mktree
 
   if git rev-parse -q --verify "${tracking_ref}^{commit}" >/dev/null; then
     parent="$(git rev-parse "${tracking_ref}^{commit}")"
+    require_oid "$parent" rev-parse
     if [[ "$(git rev-parse "${parent}^{tree}")" == "$tree" ]]; then
       echo "State unchanged; nothing to commit"
       return 0
@@ -108,6 +124,7 @@ commit_and_push() {
   local commit
   commit="$(git commit-tree "$tree" ${parent:+-p "$parent"} \
     -m "Update job tracker state ($(date -u +%Y-%m-%dT%H:%M:%SZ))")"
+  require_oid "$commit" commit-tree
   # A plain push (no force) fails if another run moved the branch, rather
   # than discarding that run's deliveries.
   if ! git push --quiet "$remote" "${commit}:refs/heads/${branch}"; then
