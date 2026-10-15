@@ -385,6 +385,25 @@ class JobStorage:
                  for job in jobs),
             )
 
+    def record_assistant_rejection(self, job: Job | dict, status: int, max_rejections: int) -> bool:
+        """Count one rejection of a job by the assistant; retire it at max_rejections.
+
+        Returns True when the job was retired (no longer pending).
+        """
+        unique_id = job.unique_id if isinstance(job, Job) else job["unique_id"]
+        with closing(self._connect()) as conn, conn:
+            conn.execute(
+                "UPDATE seen_jobs SET assistant_attempts = assistant_attempts + 1 WHERE unique_id = ?",
+                (unique_id,),
+            )
+            cursor = conn.execute(f"""
+                UPDATE seen_jobs
+                SET assistant_notified = {SUPPRESSED}, suppressed_reason = ?
+                WHERE unique_id = ? AND assistant_notified = {PENDING}
+                  AND assistant_attempts >= ?
+            """, (f"assistant_rejected:HTTP {status}", unique_id, max_rejections))
+            return cursor.rowcount > 0
+
     def get_unnotified(self) -> list[dict]:
         """Get all jobs that haven't been sent to Discord yet."""
         return self.get_pending("discord")

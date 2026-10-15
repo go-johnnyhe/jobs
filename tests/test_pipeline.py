@@ -10,7 +10,7 @@ import pytest
 
 import main
 import screening
-from assistant_notifier import AssistantNotifier
+from assistant_notifier import AssistantNotifier, DeliveryResult
 from models import Job, ScrapeResult
 from storage import DELIVERED, PENDING, SUPPRESSED, JobStorage
 from tests.postings import load_posting
@@ -290,14 +290,22 @@ class RecordingDiscord:
 
 
 class RecordingAssistant(AssistantNotifier):
+    """results: True (accepted), False (endpoint down), an int status, or a
+    callable taking the payload and returning one of those."""
+
     def __init__(self, results=None, configured=True, batch_size=25):
         super().__init__("https://assistant.example/hook" if configured else "", "", batch_size=batch_size)
         self.results = list(results or [])
         self.payloads = []
 
-    def send_payload(self, payload, *, dry_run=False):
+    def deliver(self, payload, *, dry_run=False):
         self.payloads.append(payload)
-        return self.results.pop(0) if self.results else True
+        outcome = self.results.pop(0) if self.results else True
+        if callable(outcome):
+            outcome = outcome(payload)
+        if outcome is True:
+            return DeliveryResult(ok=True, status=200)
+        return DeliveryResult(ok=False, status=503 if outcome is False else outcome)
 
 
 def seed_pending(storage, count):
@@ -367,6 +375,64 @@ def test_assistant_retires_week_old_backlog(storage):
     main._send_assistant_notifications(storage, assistant, dry_run=False, run_timestamp="t")
     assert [len(p["jobs"]) for p in assistant.payloads] == [1]
     assert len(storage.get_pending("discord")) == 2
+
+
+def _reject_job(title, status=422):
+    def outcome(payload):
+        return status if any(job["title"] == title for job in payload["jobs"]) else True
+    return outcome
+
+
+def test_rejected_batch_is_split_and_only_the_bad_job_stays_pending(storage):
+    seed_pending(storage, 25)
+    bad = "Software Engineer 13"
+    assistant = RecordingAssistant(results=[_reject_job(bad)] * 50)
+    assert main._send_assistant_notifications(
+        storage, assistant, dry_run=False, run_timestamp="t",
+    ) is False
+    assert [row["title"] for row in storage.get_pending("assistant")] == [bad]
+    delivered = [
+        job["title"] for p in assistant.payloads if bad not in [j["title"] for j in p["jobs"]]
+        for job in p["jobs"]
+    ]
+    assert len(delivered) == 24 and len(set(delivered)) == 24
+    # Bisecting 25 jobs isolates the bad one in a handful of requests.
+    assert len(assistant.payloads) <= 12
+    assert [bad] in [[job["title"] for job in p["jobs"]] for p in assistant.payloads]
+    assert storage.get_pending("assistant")[0]["assistant_attempts"] == 1
+
+
+def test_job_rejected_on_three_runs_is_retired_with_a_reason(storage):
+    seed_pending(storage, 3)
+    bad = "Software Engineer 1"
+    for run in range(3):
+        assistant = RecordingAssistant(results=[_reject_job(bad, 400)] * 10)
+        assert main._send_assistant_notifications(
+            storage, assistant, dry_run=False, run_timestamp="t",
+        ) is False
+        pending = [row["title"] for row in storage.get_pending("assistant")]
+        assert pending == ([bad] if run < 2 else [])
+    row = next(r for r in storage.get_recent(10) if r["title"] == bad)
+    assert row["assistant_notified"] == SUPPRESSED
+    assert row["suppressed_reason"] == "assistant_rejected:HTTP 400"
+    assert row["notified"] == PENDING
+
+    # Later runs are unaffected.
+    storage.add_jobs([make_job(50)])
+    assistant = RecordingAssistant()
+    assert main._send_assistant_notifications(storage, assistant, dry_run=False, run_timestamp="t") is True
+    assert [job["title"] for p in assistant.payloads for job in p["jobs"]] == ["Software Engineer 50"]
+
+
+@pytest.mark.parametrize("status", [401, 403, 404, 503])
+def test_endpoint_errors_stop_without_counting_rejections(storage, status):
+    seed_pending(storage, 30)
+    assistant = RecordingAssistant(results=[True, status])
+    assert main._send_assistant_notifications(storage, assistant, dry_run=False, run_timestamp="t") is False
+    assert len(assistant.payloads) == 2
+    pending = storage.get_pending("assistant")
+    assert len(pending) == 5
+    assert {row["assistant_attempts"] for row in pending} == {0}
 
 
 def test_channels_fail_independently(storage):
@@ -605,15 +671,39 @@ def test_state_is_saved_even_when_the_run_crashes(monkeypatch, tmp_path):
     install_fakes(monkeypatch, feeds, RecordingDiscord(), RecordingAssistant())
 
     def boom(*_args, **_kwargs):
-        raise RuntimeError("crash after scanning")
+        raise RuntimeError("crash in Discord delivery")
 
-    monkeypatch.setattr(main, "_send_assistant_notifications", boom)
+    monkeypatch.setattr(main, "_send_pending_notifications", boom)
     feeds.lists[SIMPLIFY] = [make_job(1)]
     state = tmp_path / "state.json"
     with pytest.raises(RuntimeError):
         run_main(monkeypatch, "--notify", "--db", str(tmp_path / "a.db"), "--state-file", str(state))
     assert state.exists()
     assert len(json.loads(state.read_text(encoding="utf-8"))["jobs"]) == 1
+
+
+def test_assistant_crash_does_not_stop_discord(monkeypatch, tmp_path, capsys):
+    feeds = Feeds()
+    discord = RecordingDiscord()
+    install_fakes(monkeypatch, feeds, discord, RecordingAssistant())
+    db = str(tmp_path / "a.db")
+    storage = JobStorage(db)
+    storage.set_meta("fresh_install", None)
+    storage.mark_baselined({SIMPLIFY, "careers:Acme"})
+
+    secret_url = "https://hooks.example/" + "s3cr3t"
+
+    def boom(*_args, **_kwargs):
+        raise ValueError(f"bad payload for {secret_url}")
+
+    monkeypatch.setattr(main, "_send_assistant_notifications", boom)
+    feeds.lists[SIMPLIFY] = [make_job(1)]
+    assert run_main(monkeypatch, "--notify", "--db", db) == 1
+    assert discord.batches == [["Software Engineer 1"]]
+    out = capsys.readouterr().out
+    assert "Assistant delivery crashed (ValueError)" in out
+    assert "s3cr3t" not in out
+    assert len(storage.get_pending("assistant")) == 1
 
 
 def test_dry_run_sends_and_marks_nothing(monkeypatch, tmp_path, capsys):

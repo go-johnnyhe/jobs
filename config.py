@@ -1138,6 +1138,10 @@ ASSISTANT_MAX_JOBS_PER_RUN = 200
 # after a long outage.
 ASSISTANT_MAX_PENDING_AGE_HOURS = 168
 ASSISTANT_MAX_ATTEMPTS = 4
+# A job the webhook rejects (HTTP 400/413/422) on this many runs is retired
+# with suppressed_reason "assistant_rejected:HTTP <status>". Rejected batches
+# are split so one bad job does not hold back the rest.
+ASSISTANT_MAX_REJECTIONS = 3
 ASSISTANT_BACKOFF_SECONDS = 2.0
 ASSISTANT_MAX_RETRY_AFTER_SECONDS = 60.0
 ASSISTANT_TIMEOUT_SECONDS = 20
